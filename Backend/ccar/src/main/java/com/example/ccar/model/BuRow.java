@@ -1,4 +1,4 @@
-package com.example.ccar;
+package com.example.ccar.model;
 
 public class BuRow {
 
