@@ -1,10 +1,18 @@
 package com.forecast.ccar.client;
 
 
+import java.io.IOException;
 import java.util.Arrays;
+
 import com.forecast.ccar.kx.c;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.lang.reflect.Array;
+import java.util.*;
+
 public class KdbClient {
+    static ObjectMapper mapper = new ObjectMapper();
+
     public static void main(String[] args) {
         c conn = null;
         try {
@@ -13,7 +21,7 @@ public class KdbClient {
             conn = new c("192.168.11.200", 5001, "test:test@123");
 
             // Run a q query
-            c.Flip result = (c.Flip) conn.k("select from trade");
+            c.Flip result = (c.Flip) conn.k("select from forecast_ccar");
 
             // Column names
             String[] cols = result.x;
@@ -22,29 +30,29 @@ public class KdbClient {
 
             System.out.println(Arrays.toString(cols));
 
-            int rowCount = java.lang.reflect.Array.getLength(data[0]);
+            List<Map<String, Object>> rows = new ArrayList<>();
+            int rowCount = Array.getLength(data[0]);
             for (int i = 0; i < rowCount; i++) {
-                StringBuilder row = new StringBuilder();
+                Map<String, Object> row = new LinkedHashMap<>();
                 for (int j = 0; j < cols.length; j++) {
-                    row.append(java.lang.reflect.Array.get(data[j], i)).append("\t");
+                    Object value = Array.get(data[j], i);
+                    if (value instanceof java.util.Date || value instanceof java.time.temporal.TemporalAccessor) {
+                        value = value.toString();
+                    }
+                    row.put(cols[j], value);
                 }
-                System.out.println(row);
+                rows.add(row);
             }
 
-            // Simple scalar result
-            long count = (Long) conn.k("count trade");
-            System.out.println("Count is "+count);
+            // Parent tag -> data node
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("forecast_ccar", Collections.singletonMap("data", rows));
 
-            // Filter with a query
-            c.Flip aapl = (c.Flip) conn.k("select from trade where sym=`AAPL");
-            System.out.println("Filter with AAPL"+aapl);
-
-            // Async (fire and forget), e.g. insert
-            conn.ks("`trade insert (`TSLA; 250.0; 75)");
-            long countAfterInsert = (Long) conn.k("count trade");
-            System.out.println("Count After Insert is "+countAfterInsert);
-
-
+            String json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(response);
+            System.out.println(json);
+            }
+        catch (c.KException | IOException ex) {
+            throw new RuntimeException(ex);
         } catch (Exception e) {
             e.printStackTrace();
         } finally {
