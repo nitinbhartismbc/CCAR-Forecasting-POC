@@ -2,10 +2,12 @@ package com.example.ccar;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.opencsv.CSVReader;
+import org.springframework.stereotype.Service;
 
 import java.io.FileReader;
 import java.util.*;
 
+@Service
 public class BuHierarchyService {
 
     public BuNode buildHierarchy(String csvFilePath) throws Exception {
