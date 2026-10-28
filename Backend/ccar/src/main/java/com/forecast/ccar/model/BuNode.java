@@ -1,4 +1,4 @@
-package com.example.ccar.model;
+package com.forecast.ccar.model;
 
 import java.util.ArrayList;
 import java.util.List;

@@ -1,4 +1,4 @@
-package com.example.ccar;
+package com.forecast.ccar;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;

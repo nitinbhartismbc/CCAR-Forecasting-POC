@@ -1,6 +1,6 @@
-package com.example.ccar.service;
+package com.forecast.ccar.service;
 
-import com.example.ccar.model.BuNode;
+import com.forecast.ccar.model.BuNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.opencsv.CSVReader;
 import org.springframework.stereotype.Service;

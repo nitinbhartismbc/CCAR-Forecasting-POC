@@ -1,0 +1,127 @@
+package com.forecast.ccar.kx;
+
+/*
+ * Copyright (c) 1998-2017 Kx Systems Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the
+ * License. You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ */
+
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+
+/**
+ * Java 8 implementation of the serialization byte-array write primitives.
+ *
+ * <p>On Java 9 and newer this class is replaced by the implementation in
+ * {@code META-INF/versions/9}, which uses VarHandle.</p>
+ */
+final class ByteArrayAccess{
+    private ByteArrayAccess(){}
+
+    static short getShortBE(byte[] b,int p){
+        return (short)( (b[p]&0xff)<<8 | b[p+1]&0xff);
+    }
+
+    static short getShortLE(byte[] b,int p){
+        return (short)( b[p]&0xff | (b[p+1]&0xff)<<8);
+    }
+
+    static int getIntBE(byte[] b,int p){
+        return (b[p]&0xff)<<24 | (b[p+1]&0xff)<<16 | (b[p+2]&0xff)<<8 | b[p+3]&0xff;
+    }
+
+    static int getIntLE(byte[] b,int p){
+        return b[p]&0xff | (b[p+1]&0xff)<<8 | (b[p+2]&0xff)<<16 | (b[p+3]&0xff)<<24;
+    }
+
+    static long getLongBE(byte[] b,int p){
+        return (long)getIntBE(b,p)<<32 | getIntBE(b,p+4)&0xffffffffL;
+    }
+
+    static long getLongLE(byte[] b,int p){
+        return getIntLE(b,p)&0xffffffffL | (long)getIntLE(b,p+4)<<32;
+    }
+
+    static void getShorts(byte[] b,int p,short[] dst,boolean littleEndian){
+        ByteBuffer.wrap(b,p,dst.length*2).order(littleEndian?ByteOrder.LITTLE_ENDIAN:ByteOrder.BIG_ENDIAN).asShortBuffer().get(dst);
+    }
+
+    static void getInts(byte[] b,int p,int[] dst,boolean littleEndian){
+        ByteBuffer.wrap(b,p,dst.length*4).order(littleEndian?ByteOrder.LITTLE_ENDIAN:ByteOrder.BIG_ENDIAN).asIntBuffer().get(dst);
+    }
+
+    static void getLongs(byte[] b,int p,long[] dst,boolean littleEndian){
+        ByteBuffer.wrap(b,p,dst.length*8).order(littleEndian?ByteOrder.LITTLE_ENDIAN:ByteOrder.BIG_ENDIAN).asLongBuffer().get(dst);
+    }
+
+    static void getFloats(byte[] b,int p,float[] dst,boolean littleEndian){
+        ByteBuffer.wrap(b,p,dst.length*4).order(littleEndian?ByteOrder.LITTLE_ENDIAN:ByteOrder.BIG_ENDIAN).asFloatBuffer().get(dst);
+    }
+
+    static void getDoubles(byte[] b,int p,double[] dst,boolean littleEndian){
+        ByteBuffer.wrap(b,p,dst.length*8).order(littleEndian?ByteOrder.LITTLE_ENDIAN:ByteOrder.BIG_ENDIAN).asDoubleBuffer().get(dst);
+    }
+
+    static void putShortBE(byte[] b,int p,short v){
+        b[p]=(byte)(v>>8);
+        b[p+1]=(byte)v;
+    }
+
+    static void putIntBE(byte[] b,int p,int v){
+        putShortBE(b,p,(short)(v>>16));
+        putShortBE(b,p+2,(short)v);
+    }
+
+    static void putLongBE(byte[] b,int p,long v){
+        putIntBE(b,p,(int)(v>>32));
+        putIntBE(b,p+4,(int)v);
+    }
+
+    static void putShortLE(byte[] b,int p,short v){
+        b[p]=(byte)v;
+        b[p+1]=(byte)(v>>8);
+    }
+
+    static void putIntLE(byte[] b,int p,int v){
+        putShortLE(b,p,(short)v);
+        putShortLE(b,p+2,(short)(v>>16));
+    }
+
+    static void putLongLE(byte[] b,int p,long v){
+        putIntLE(b,p,(int)v);
+        putIntLE(b,p+4,(int)(v>>32));
+    }
+
+    static void putShortsLE(byte[] b,int p,short[] a){
+        ByteBuffer.wrap(b,p,a.length*2).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().put(a);
+    }
+
+    static void putIntsLE(byte[] b,int p,int[] a){
+        ByteBuffer.wrap(b,p,a.length*4).order(ByteOrder.LITTLE_ENDIAN).asIntBuffer().put(a);
+    }
+
+    static void putLongsLE(byte[] b,int p,long[] a){
+        ByteBuffer.wrap(b,p,a.length*8).order(ByteOrder.LITTLE_ENDIAN).asLongBuffer().put(a);
+    }
+
+    static void putFloatsLE(byte[] b,int p,float[] a){
+        for(float v:a){
+            putIntLE(b,p,Float.floatToIntBits(v));
+            p+=4;
+        }
+    }
+
+    static void putDoublesLE(byte[] b,int p,double[] a){
+        for(double v:a){
+            putLongLE(b,p,Double.doubleToLongBits(v));
+            p+=8;
+        }
+    }
+}

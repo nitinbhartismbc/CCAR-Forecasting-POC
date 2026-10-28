@@ -1,6 +1,6 @@
-package com.example.ccar.controller;
+package com.forecast.ccar.controller;
 
-import com.example.ccar.service.BuHierarchyService;
+import com.forecast.ccar.service.BuHierarchyService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;

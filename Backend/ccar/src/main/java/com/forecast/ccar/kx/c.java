@@ -1,0 +1,2216 @@
+package com.forecast.ccar.kx;
+
+/*
+ * Copyright (c) 1998-2017 Kx Systems Inc.
+ *com.xyz.ecommerce.common.kx
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the
+ * License. You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ */
+
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
+import java.io.*;
+import java.lang.reflect.Array;
+import java.lang.reflect.Method;
+import java.net.*;
+import java.nio.ByteBuffer;
+import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.SocketChannel;
+import java.nio.charset.Charset;
+import java.nio.charset.IllegalCharsetNameException;
+import java.nio.charset.StandardCharsets;
+import java.nio.charset.UnsupportedCharsetException;
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.util.*;
+
+/**
+ * Connector class for interfacing with a kdb+ process. This class is essentially a serializer/deserializer of java types
+ * to/from the kdb+ ipc wire format, enabling remote method invocation in kdb+ via tcp/ip.
+ * <p>
+ * Further information can be found at <a href="https://code.kx.com/q/interfaces/java-client-for-q/">https://code.kx.com/q/interfaces/java-client-for-q/</a>
+ * <p>
+ * To begin with, a connection may be established to a listening kdb+ process via the constructor
+ *
+ * <code>c connection=new c("localhost",5000);</code>
+ * </p>
+ * <p>
+ *  There are then 3 methods available for interacting with the connection:
+ *   <ol>
+ *     <li>Sending a sync message using k() <br>
+ *       <code>Object result=connection.k("functionName",args);</code>
+ *
+ *     <li>Sending an async message using ks()<br>
+ *       <code>connection.ks("functionName",args); </code>
+ *
+ *     <li>Awaiting an incoming async message using k()<br>
+ *       <code>Object object=connection.k();</code>. <br>
+ *       When the connection is no longer required, it may be closed via connection.close();
+ *   </ol>
+ */
+public class c{
+    /**
+     * Encoding specifies the character encoding to use when [de]-serializing strings.
+     */
+    private static Charset encoding = StandardCharsets.ISO_8859_1;
+    /**
+     *  {@code sync}  tracks how many response messages the remote is expecting
+     */
+    private int sync=0;
+    /**
+     * Representation of a null for a time atom within kdb
+     */
+    public static final LocalTime LOCAL_TIME_NULL = LocalTime.ofNanoOfDay(1);
+    /**
+     * Sets character encoding for serialising/deserialising strings.
+     *
+     * @param encoding The name of a supported
+     *                 <a href="../lang/package-summary.html#charenc">
+     *                 character encoding</a>
+     * @throws UnsupportedEncodingException
+     *                If the named encoding is not supported
+     */
+    public static void setEncoding(String encoding) throws UnsupportedEncodingException{
+        try {
+            c.encoding = Charset.forName(encoding);
+        } catch (IllegalCharsetNameException | UnsupportedCharsetException e) {
+            UnsupportedEncodingException ue = new UnsupportedEncodingException(encoding);
+            ue.initCause(e);
+            throw ue;
+        }
+    }
+    /**
+     * {@code s} is the socket used to communicate with the remote kdb+ process.
+     */
+    public Socket s;
+    /**
+     * {@code channel} is the socket channel used to communicate using UDS with the remote kdb+ process.
+     */
+    private SocketChannel channel;
+    /**
+     * {@code i} is the {@code DataInputStream} of the socket used to read data from the remote kdb+ process.
+     */
+    DataInputStream inStream;
+    /**
+     * {@code o} is the outputStream of the socket used to write data to the remote kdb+ process.
+     */
+    OutputStream outStream;
+    /**
+     * {@code b} is the buffer used to store the incoming message bytes from the remote prior to de-serialization
+     */
+    byte[] rBuff;
+    /**
+     * {@code j} is the current position of the de-serializer within the read buffer b
+     */
+    int rBuffPos;
+    /**
+     * {@code wBuff} is the buffer used to store the outgoing message bytes when serializing an object
+     */
+    byte[] wBuff;
+    /**
+     * {@code wBuffPos} is the current position the serializer within the write buffer wBuff
+     */
+    int wBuffPos;
+    /**
+     * {@code ipcVersion} indicates the ipc version to encode with
+     */
+    int ipcVersion;
+    /**
+     * Marks whether the message being deserialized was encoded little or big endian.
+     */
+    boolean isLittleEndian;
+    /**
+     * Indicates whether the current connection is to a local interface. Tested when considering whether to compress an outgoing message.
+     */
+    boolean isLoopback;
+    /**
+     * Indicates whether messages should be candidates for compressing before sending (given uncompressed serialized data also has a length
+     * greater than 2000 bytes and connection is not localhost)
+     */
+    boolean zip;
+
+    private static final String ACCESS="access";
+    /**
+     * Sets whether or not to consider compression on outgoing messages (given uncompressed serialized data also has a length
+     * greater than 2000 bytes and connection is not localhost)
+     * @param b true if to use a compression. Default is false.
+     * @see <a href="https://code.kx.com/q/ref/ipc/#compression">IPC compression</a>
+     */
+    public void zip(boolean b){
+        zip=b;
+    }
+    private static boolean isLoopback(InetAddress addr){
+        return addr.isAnyLocalAddress()||addr.isLoopbackAddress();
+    }
+    /**
+     * Prepare socket for kdb+ ipc comms
+     * @param x socket to setup
+     * @throws IOException an I/O error occurs.
+     */
+    void io(Socket x) throws IOException{
+        s=x;
+        s.setTcpNoDelay(true);
+        s.setKeepAlive(true);
+        isLoopback=isLoopback(s.getInetAddress());
+        inStream=new DataInputStream(s.getInputStream());
+        outStream=s.getOutputStream();
+    }
+
+    private static IOException close(IOException failure, java.io.Closeable resource) {
+        if (null == resource)
+            return failure;
+        try {
+            resource.close();
+        } catch (IOException e) {
+            if (null == failure)
+                failure = e;
+            else
+                failure.addSuppressed(e);
+        }
+        return failure;
+    }
+
+    /**
+     * Closes the current connection to the remote process.
+     * @throws IOException if an I/O error occurs when closing this socket.
+     */
+    public void close() throws IOException {
+        IOException failure = null;
+        failure = close(failure, s);
+        failure = close(failure, channel);
+        failure = close(failure, inStream);
+        failure = close(failure, outStream);
+        s = null;
+        channel = null;
+        inStream = null;
+        outStream = null;
+        if (null != failure)
+            throw failure;
+    }
+
+    /** When acting as a server for client connections, {@code IAuthenticate} describes an interface to
+     * use in order to authenticate incoming connections based on the KDB+ handshake.
+     * */
+    public interface IAuthenticate{
+        /**
+         * Checks authentication string provided to allow/reject connection.
+         * @see <a href="https://code.kx.com/q/ref/dotz/#zpw-validate-user">.z.pw</a>
+         * @param s String containing username:password for authentication
+         * @return true if credentials accepted.
+         */
+        public boolean authenticate(String s);
+    }
+    /**
+     * Initializes a new {@link c} instance by acting as a server, blocking
+     * till a client connects and authenticates using the KDB+ protocol. This object
+     * should be used for a single client connection. A new instance should be created
+     * for each new client connection. The maximum transmissible message size is 2GB due to a limitation with the maximum array size in Java, therefore <a href="https://code.kx.com/q/basics/ipc/#handshake">
+     * capability 3</a> will be used within the kdb+ handshake.
+     * @param s {@link ServerSocketChannel} to accept connections on using kdb+ IPC protocol.
+     * @param a {@link IAuthenticate} instance to authenticate incoming connections.
+     *          Accepts all incoming connections if {@code null}.
+     * @throws IOException if access is denied or an I/O error occurs.
+     *
+     */
+    public c(ServerSocketChannel s,IAuthenticate a) throws IOException{
+        this();
+        channel=s.accept();
+        channel.configureBlocking(true);
+        SocketAddress addr=channel.getRemoteAddress();
+        if(addr instanceof InetSocketAddress){
+            isLoopback=isLoopback(((InetSocketAddress)addr).getAddress());
+            channel.setOption(StandardSocketOptions.TCP_NODELAY, true);
+            channel.setOption(StandardSocketOptions.SO_KEEPALIVE, true);
+        }else
+            isLoopback=true;
+        ByteBuffer buffer = ByteBuffer.allocate(1);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        int bytesRead=0;
+        rBuff = null;
+        while (channel.read(buffer) != -1) {
+            buffer.flip();
+            byte b = buffer.get();
+            output.write(b);
+            if (b == 0) {
+                rBuff = output.toByteArray();
+                bytesRead = rBuff.length;
+                break;
+            }
+            buffer.clear();
+        }
+        if(rBuff==null||bytesRead<2||(a!=null&&!a.authenticate(new String(rBuff,0,bytesRead-2)))){
+            close();
+            throw new IOException(ACCESS);
+        }
+        ipcVersion=rBuff[bytesRead-2];
+        buffer.clear();
+        buffer.put((byte)(ipcVersion<'\3'?ipcVersion:'\3'));
+        buffer.flip();
+        channel.write(buffer);
+    }
+    /**
+     * Initializes a new {@link c} instance by acting as a server, and blocks while waiting
+     * for a new client connection. A new instance should be created for each new client connection.
+     * The maximum transmissible message size is 2GB due to a limitation with the maximum array size in Java, therefore <a href="https://code.kx.com/q/basics/ipc/#handshake">
+     * capability 3</a> will be used within the kdb+ handshake.
+     * @param s {@link ServerSocketChannel} to accept connections on using kdb+ IPC protocol.
+     * @throws IOException an I/O error occurs.
+     */
+    public c(ServerSocketChannel s) throws IOException{
+        this(s,null);
+    }
+    /**
+     * Initializes a new {@link c} instance by acting as a server, blocking
+     * till a client connects and authenticates using the KDB+ protocol. This object
+     * should be used for a single client connection. A new instance should be created
+     * for each new client connection. The maximum transmissible message size is 2GB due to a limitation with the maximum array size in Java, therefore <a href="https://code.kx.com/q/basics/ipc/#handshake">
+     * capability 3</a> will be used within the kdb+ handshake.
+     * @param s {@link ServerSocket} to accept connections on using kdb+ IPC protocol.
+     * @param a {@link IAuthenticate} instance to authenticate incoming connections.
+     *          Accepts all incoming connections if {@code null}.
+     * @throws IOException if access is denied or an I/O error occurs.
+     */
+    public c(ServerSocket s,IAuthenticate a) throws IOException{
+        io(s.accept());
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        byte[] temp = new byte[1];
+        int bytesRead = 0;
+        rBuff = null;
+        while (inStream.read(temp) != -1) {
+            buffer.write(temp[0]);
+            if (temp[0] == 0) {
+                rBuff = buffer.toByteArray();
+                bytesRead = rBuff.length;
+                break;
+            }
+        }
+        if(rBuff==null||bytesRead<2||(a!=null&&!a.authenticate(new String(rBuff,0,bytesRead-2)))){
+            close();
+            throw new IOException(ACCESS);
+        }
+        ipcVersion=rBuff[bytesRead-2];
+        temp[0]=(byte)(ipcVersion<'\3'?ipcVersion:'\3');
+        outStream.write(temp,0,1);
+    }
+
+    /**
+     * Initializes a new {@link c} instance by acting as a server, and blocks while waiting
+     * for a new client connection. A new instance should be created for each new client connection.
+     * The maximum transmissible message size is 2GB due to a limitation with the maximum array size in Java, therefore <a href="https://code.kx.com/q/basics/ipc/#handshake">
+     * capability 3</a> will be used within the kdb+ handshake.
+     * @param s {@link ServerSocket} to accept connections on using kdb+ IPC protocol.
+     * @throws IOException an I/O error occurs.
+     */
+    public c(ServerSocket s) throws IOException{
+        this(s,null);
+    }
+    /**
+     * Initializes a new {@link c} instance and connects to kdb+ over UDS (unix domain sockets).
+     * Requires java 16 or greater. Using with earlier versions will throw an UnsupportedOperationException.
+     * See kdb+ documentation on UDS for details of setup. Client must be running on same machine
+     * as kdb+ target. Requires OS support.
+     * The maximum transmissible message size is 2GB due to a limitation with the maximum array size in Java, therefore <a href="https://code.kx.com/q/basics/ipc/#handshake">
+     * capability 3</a> will be used within the kdb+ handshake.
+     * @param file uds file e.g. "/tmp/kx.5010" is the default with kdb+ listening on port 5010
+     * @param usernamepassword Username and password as "username:password" for remote authorization
+     * @throws KException if access denied
+     * @throws IOException if an I/O error occurs.
+     * @throws UnsupportedOperationException if UDS not supported on this version of java (requires version 16 or greater)
+     */
+    public c(String file,String usernamepassword) throws KException,IOException,UnsupportedOperationException{
+        this();
+        Object address = null;
+        try{
+            Class<?> myClass = Class.forName("java.net.UnixDomainSocketAddress");
+            Method method = myClass.getDeclaredMethod("of", String.class);
+            address = method.invoke(null, file);
+        }catch(Exception e){
+            throw new UnsupportedOperationException("Unix domain sockets not supported with this version of Java");
+        }
+        channel = SocketChannel.open((SocketAddress)address);
+        isLoopback=true;
+        wBuff=new byte[2+ns(usernamepassword)];
+        wBuffPos=0;
+        w(usernamepassword+"\3");
+        write(wBuff);
+        ByteBuffer buf1 = ByteBuffer.allocate(1);
+        if(1!=channel.read(buf1)){
+            throw new KException(ACCESS);
+        }
+        buf1.flip();
+        ipcVersion=buf1.get();
+    }
+    /**
+     * Initializes a new {@link c} instance and connects to KDB+ over TCP.
+     * The maximum transmissible message size is 2GB due to a limitation with the maximum array size in Java, therefore <a href="https://code.kx.com/q/basics/ipc/#handshake">
+     * capability 3</a> will be used within the kdb+ handshake.
+     * @param host Host of remote q process
+     * @param port Port of remote q process
+     * @param usernamepassword Username and password as "username:password" for remote authorization
+     * @throws KException if access denied
+     * @throws IOException if an I/O error occurs.
+     */
+    public c(String host,int port,String usernamepassword) throws KException,IOException{
+        this(host,port,usernamepassword,false,0);
+    }
+
+    /**
+     * Initializes a new {@link c} instance and connects to KDB+ over TCP with optional TLS support for encryption.
+     * The maximum transmissible message size is 2GB due to a limitation with the maximum array size in Java, therefore <a href="https://code.kx.com/q/basics/ipc/#handshake">
+     * capability 3</a> will be used within the kdb+ handshake.
+     * @param host Host of remote q process
+     * @param port Port of remote q process
+     * @param usernamepassword Username and password as "username:password" for remote authorization
+     * @param useTLS whether to use TLS to encrypt the connection
+     * @param timeout Enable/disable SO_TIMEOUT with the specified timeout, in milliseconds. 0 to disable (default) @see java.net.Socket#setSoTimeout()
+     * @throws KException if access denied
+     * @throws IOException if an I/O error occurs.
+     */
+    public c(String host,int port,String usernamepassword,boolean useTLS,int timeout) throws KException,IOException{
+        wBuff=new byte[2+ns(usernamepassword)];
+        s=new Socket(host,port);
+        s.setSoTimeout(timeout);
+        if(useTLS){
+            try{
+                s=((SSLSocketFactory)SSLSocketFactory.getDefault()).createSocket(s,host,port,true);
+                ((SSLSocket)s).startHandshake();
+            }
+            catch(Exception e){
+                s.close();
+                throw e;
+            }
+        }
+        io(s);
+        wBuffPos=0;
+        w(usernamepassword+"\3");
+        outStream.write(wBuff);
+        if(1!=inStream.read(wBuff,0,1)){
+            close();
+            throw new KException(ACCESS);
+        }
+        ipcVersion=Math.min(wBuff[0],3);
+    }
+    /**
+     * Initializes a new {@link c} instance and connects to KDB+ over TCP with optional TLS support for encryption.
+     * The maximum transmissible message size is 2GB due to a limitation with the maximum array size in Java, therefore <a href="https://code.kx.com/q/basics/ipc/#handshake">
+     * capability 3</a> will be used within the kdb+ handshake.
+     * @param host Host of remote q process
+     * @param port Port of remote q process
+     * @param usernamepassword Username and password as "username:password" for remote authorization
+     * @param useTLS whether to use TLS to encrypt the connection
+     * @throws KException if access denied
+     * @throws IOException if an I/O error occurs.
+     */
+    public c(String host,int port,String usernamepassword,boolean useTLS) throws KException,IOException{
+        this(host,port,usernamepassword,useTLS,0);
+    }
+    /**
+     * Initializes a new {@link c} instance and connects to KDB+ over TCP, using {@code user.name} system property for username and password criteria.
+     * The {@code user.name} system property should be set to a value in the "username:password" format for remote authorization.
+     * The maximum transmissible message size is 2GB due to a limitation with the maximum array size in Java, therefore <a href="https://code.kx.com/q/basics/ipc/#handshake">
+     * capability 3</a> will be used within the kdb+ handshake.
+     *
+     * @param host Host of remote q process
+     * @param port Port of remote q process
+     * @throws KException if access denied
+     * @throws IOException if an I/O error occurs.
+     */
+    public c(String host,int port) throws KException,IOException{
+        this(host,port,System.getProperty("user.name"),false,0);
+    }
+    /** Initializes a new {@link c} instance for the purposes of serialization only, no connection is instantiated
+     * to/from a KDB+ process. The maximum transmissible message size is 2GB due to a limitation with the maximum array size in Java, therefore <a href="https://code.kx.com/q/basics/ipc/#handshake">
+     * capability 3</a> will be used within the kdb+ handshake.
+     */
+    public c(){
+        ipcVersion='\3';
+        isLoopback=false;
+        inStream=new DataInputStream(new InputStream(){
+            @Override
+            public int read()throws IOException{
+                throw new UnsupportedOperationException("nyi");
+            }});
+        outStream=new OutputStream(){
+            @Override
+            public void write(int b)throws IOException{
+                throw new UnsupportedOperationException("nyi");
+            }};
+    }
+
+    /** {@code Month} represents kdb+ month type, which is the number of months since Jan 2000. */
+    public static class Month implements Comparable<Month>{
+        /** Number of months since Jan 2000 */
+        public int i;
+        /**
+         * Create a KDB+ representation of 'month' type from the q language
+         * (a month value is the count of months since the beginning of the millennium.
+         * Post-milieu is positive and pre is negative)
+         * @param x Number of months from millennium
+         */
+        public Month(int x){
+            i=x;
+        }
+        @Override
+        public String toString(){
+            if(i==ni)
+                return "";
+            long m=(long)i+24000;
+            long y=m/12;
+            return i2((int)(y/100))+i2((int)(y%100))+"-"+i2((int)(1+m%12));
+        }
+        @Override
+        public boolean equals(final Object o){
+            return ((o instanceof Month) && (((Month)o).i==i));
+        }
+        @Override
+        public int hashCode(){
+            return i;
+        }
+        @Override
+        public int compareTo(Month m){
+            return Integer.compare(i,m.i);
+        }
+    }
+
+    /** {@code Minute} represents kdb+ minute type, which is a time represented as the number of minutes from midnight. */
+    public static class Minute implements Comparable<Minute>{
+        /** Number of minutes since midnight. */
+        public int i;
+        /**
+         * Create a KDB+ representation of 'minute' type from the q language
+         * (point in time represented in minutes since midnight)
+         * @param x Number of minutes since midnight
+         */
+        public Minute(int x){
+            i=x;
+        }
+        @Override
+        public String toString(){
+            if(i==ni)
+                return "";
+            int a=Math.abs(i);
+            return (i<0?"-":"")+i2(a/60)+":"+i2(a%60);
+        }
+        @Override
+        public boolean equals(final Object o){
+            return ( (o instanceof Minute)&&(((Minute)o).i==i) );
+        }
+        @Override
+        public int hashCode(){
+            return i;
+        }
+        @Override
+        public int compareTo(Minute m){
+            return Integer.compare(i,m.i);
+        }
+    }
+
+    /** {@code Second} represents kdb+ second type, which is a point in time represented in seconds since midnight. */
+    public static class Second implements Comparable<Second>{
+        /** Number of seconds since midnight. */
+        public int i;
+        /**
+         * Create a KDB+ representation of 'second' type from the q language
+         * (point in time represented in seconds since midnight)
+         * @param x Number of seconds since midnight
+         */
+        public Second(int x){
+            i=x;
+        }
+        @Override
+        public String toString(){
+            if(i==ni)
+                return "";
+            int a=Math.abs(i);
+            return (i<0?"-":"")+new Minute(a/60).toString()+':'+i2(a%60);
+        }
+        @Override
+        public boolean equals(final Object o){
+            return ( (o instanceof Second)&&(((Second)o).i==i) );
+        }
+        @Override
+        public int hashCode(){
+            return i;
+        }
+        @Override
+        public int compareTo(Second s){
+            return Integer.compare(i,s.i);
+        }
+    }
+
+    /** {@code Timespan} represents kdb+ timestamp type, which is a point in time represented in nanoseconds since midnight. */
+    public static class Timespan implements Comparable<Timespan>{
+        /** Number of nanoseconds since midnight. */
+        public long j;
+        /**
+         * Create a KDB+ representation of 'timespan' type from the q language
+         * (point in time represented in nanoseconds since midnight)
+         * @param x Number of nanoseconds since midnight
+         */
+        public Timespan(long x){
+            j=x;
+        }
+        /** Constructs {@code Timespan} using current time since midnight and default timezone. */
+        public Timespan(){
+            this(TimeZone.getDefault());
+        }
+        /**
+         * Constructs {@code Timespan} using current time since midnight and default timezone.
+         * @param tz {@code TimeZone} to use for deriving midnight.
+         */
+        public Timespan(TimeZone tz){
+            Calendar c=Calendar.getInstance(tz);
+            long now=c.getTimeInMillis();
+            c.set(Calendar.HOUR_OF_DAY,0);
+            c.set(Calendar.MINUTE,0);
+            c.set(Calendar.SECOND,0);
+            c.set(Calendar.MILLISECOND,0);
+            j=(now-c.getTimeInMillis())*1000000L;
+        }
+        @Override
+        public String toString(){
+            if(j==nj)
+                return "";
+            String s=j<0?"-":"";
+            long jj=j<0?-j:j;
+            int d=((int)(jj/86400000000000L));
+            if(d!=0)
+                s+=d+"D";
+            return s+i2((int)((jj%86400000000000L)/3600000000000L))+":"+i2((int)((jj%3600000000000L)/60000000000L))+":"+i2((int)((jj%60000000000L)/1000000000L))+"."+i9((int)(jj%1000000000L));
+        }
+        @Override
+        public int compareTo(Timespan t){
+            if (j>t.j)
+                return 1;
+            return j<t.j?-1:0;
+        }
+        @Override
+        public boolean equals(final Object o){
+            return ( (o instanceof Timespan) && (((Timespan)o).j==j) );
+        }
+        @Override
+        public int hashCode(){
+            return (int)(j^(j>>>32));
+        }
+    }
+    /**
+     * {@code Dict} represents the kdb+ dictionary type, which is a mapping from a key list to a value list.
+     * The two lists must have the same count.
+     * An introduction can be found at <a href="https://code.kx.com/q4m3/5_Dictionaries/">https://code.kx.com/q4m3/5_Dictionaries/</a>
+     */
+    public static class Dict{
+        /** Dict keys */
+        public Object x;
+        /** Dict values */
+        public Object y;
+        /**
+         * Create a representation of the KDB+ dictionary type, which is a
+         * mapping between keys and values
+         * @param keys Keys to store. Should be an array type when using multiple values.
+         * @param vals Values to store. Index of each value should match the corresponding associated key.
+         *  Should be an array type when using multiple values.
+         */
+        public Dict(Object keys,Object vals){
+            x=keys;
+            y=vals;
+        }
+    }
+    /**
+     * {@code Flip} represents a kdb+ table (an array of column names, and an array of arrays containing the column data).
+     * q tables are column-oriented, in contrast to the row-oriented tables in relational databases.
+     * An introduction can be found at <a href="https://code.kx.com/q4m3/8_Tables/">https://code.kx.com/q4m3/8_Tables/</a>
+     */
+    public static class Flip{
+        /** Array of column names. */
+        public String[] x;
+        /** Array of arrays of the column values. */
+        public Object[] y;
+        /**
+         * Create a Flip (KDB+ table) from the values stored in a Dict.
+         * @param dict Values stored in the dict should be an array of Strings for the column names (keys), with an
+         * array of arrays for the column values
+         * @throws IllegalArgumentException if the dict values are not an array of column data (Object[]). This can be
+         * the case when a splayed/partitioned table stored on disk is received (kdb+ transmits a mapping of column names
+         * to an on-disk path symbol rather than the column data), or when the Dict was constructed with values that are
+         * not column arrays.
+         * @see <a href="https://code.kx.com/q/kb/splayed-tables/">Splayed tables</a>
+         */
+        public Flip(Dict dict){
+            x=(String[])dict.x;
+            if(!(dict.y instanceof Object[]))
+                throw new IllegalArgumentException("A Flip requires the dictionary values to be an array of column data"
+                        +" (Object[]) but received: "+dict.y+". This can occur when a splayed/partitioned table stored on disk is"
+                        +" received (kdb+ transmits an on-disk path reference rather than the columns), or when the Dict was"
+                        +" constructed with values that are not column arrays.");
+            y=(Object[])dict.y;
+        }
+        /**
+         * Create a Flip (KDB+ table) from array of column names and array of arrays of the column values.
+         * @param x Array of column names
+         * @param y Array of arrays of the column values
+         */
+        public Flip(String[] x, Object[] y) {
+            this.x=x;
+            this.y=y;
+        }
+        /**
+         * Returns the column values given the column name
+         * @param s The column name
+         * @return The value(s) associated with the column name which can be casted to an array of objects.
+         */
+        public Object at(String s){
+            return y[find(x,s)];
+        }
+    }
+    /**
+     * {@code KException} is used to indicate there was an error generated by the remote process during the processing of a sync message or if the connection failed due to access credentials.
+     * Network errors are reported as IOException.
+     */
+    public static class KException extends Exception{
+        private static final long serialVersionUID = 1554689726734674152L; // autogenerated by serialver kx.c.KException
+        KException(String s){
+            super(s);
+        }
+    }
+    private void compress(){
+        byte i=0;
+        boolean g;
+        final int origSize=wBuffPos;
+        int f=0;
+        int h0=0;
+        int h=0;
+        byte[] y=wBuff;
+        wBuff=new byte[y.length/2];
+        int c=12;
+        int d=c;
+        int e=wBuff.length;
+        int p=0;
+        int q;
+        int r;
+        int s0=0;
+        int s1=8;
+        int t=wBuffPos;
+        int[] a=new int[256];
+        System.arraycopy(y,0,wBuff,0,4);
+        wBuff[2]=1;
+        wBuffPos=8;
+        w(origSize);
+        for(;s1<t;i*=2){
+            if(0==i){
+                if(d>e-17){
+                    wBuffPos=origSize;
+                    wBuff=y;
+                    return;
+                }
+                i=1;
+                wBuff[c]=(byte)f;
+                c=d++;
+                f=0;
+            }
+            g=(s1>t-3)||(0==(p=a[h=0xFF&(y[s1]^y[s1+1])]))||(0!=(y[s1]^y[p]));
+            if(0<s0){
+                a[h0]=s0;
+                s0=0;
+            }
+            if(g){
+                h0=h;
+                s0=s1;
+                wBuff[d++]=y[s1++];
+            }else{
+                a[h]=s1;
+                f|=i;
+                p+=2;
+                r=s1+=2;
+                q=Math.min(s1+255,t);
+                while(y[p]==y[s1]&&++s1<q)
+                    ++p;
+                wBuff[d++]=(byte)h;
+                wBuff[d++]=(byte)(s1-r);
+            }
+        }
+        wBuff[c]=(byte)f;
+        wBuffPos=4;
+        w(d);
+        wBuffPos=d;
+        wBuff=Arrays.copyOf(wBuff,wBuffPos);
+    }
+    private void uncompress(){
+        int n=0;
+        int r=0;
+        int f=0;
+        int s1=8;
+        int p=s1;
+        short i=0;
+        byte[] dst=new byte[ri()];
+        int d=rBuffPos;
+        int[] aa=new int[256];
+        while(s1<dst.length){
+            if(i==0){
+                f=0xff&rBuff[d++];
+                i=1;
+            }
+            if((f&i)!=0){
+                r=aa[0xff&rBuff[d++]];
+                dst[s1++]=dst[r++];
+                dst[s1++]=dst[r++];
+                n=0xff&rBuff[d++];
+                for(int m=0;m<n;m++)
+                    dst[s1+m]=dst[r+m];
+            }else
+                dst[s1++]=rBuff[d++];
+            while(p<s1-1)
+                aa[(0xff&dst[p])^(0xff&dst[p+1])]=p++;
+            if((f&i)!=0)
+                p=s1+=n;
+            i*=2;
+            if(i==256)
+                i=0;
+        }
+        rBuff=dst;
+        rBuffPos=8;
+    }
+    /**
+     * Write byte to serialization buffer and increment buffer position
+     * @param x byte to write to buffer
+     */
+    void w(byte x){
+        wBuff[wBuffPos++]=x;
+    }
+    /** null integer, i.e. 0Ni */
+    static int ni=Integer.MIN_VALUE;
+    /** null long, i.e. 0N */
+    static long nj=Long.MIN_VALUE;
+    /** null float, i.e. 0Nf or 0n */
+    static double nf=Double.NaN;
+    /**
+     * Deserialize boolean from byte buffer
+     * @return Deserialized boolean
+     */
+    boolean rb(){
+        return 0!=rBuff[rBuffPos++];
+    }
+    /**
+     * Write boolean to serialization buffer
+     * @param x boolean to serialize
+     */
+    void w(boolean x){
+        w((byte)(x?1:0));
+    }
+    /**
+     * Deserialize char from byte buffer
+     * @return Deserialized char
+     */
+    char rc(){
+        return (char)(rBuff[rBuffPos++]&0xff);
+    }
+    /**
+     * Write char to serialization buffer
+     * @param c char to serialize
+     */
+    void w(char c){
+        w((byte)c);
+    }
+    /**
+     * Deserialize short from byte buffer
+     * @return Deserialized short
+     */
+    short rh(){
+        int p=rBuffPos;
+        short v=isLittleEndian?ByteArrayAccess.getShortLE(rBuff,p):ByteArrayAccess.getShortBE(rBuff,p);
+        rBuffPos=p+2;
+        return v;
+    }
+    /**
+     * Write short to serialization buffer in big endian format
+     * @param h short to serialize
+     */
+    void w(short h){
+        ByteArrayAccess.putShortLE(wBuff,wBuffPos,h);
+        wBuffPos+=2;
+    }
+    /**
+     * Deserialize int from byte buffer
+     * @return Deserialized int
+     */
+    int ri(){
+        int p=rBuffPos;
+        int v=isLittleEndian?ByteArrayAccess.getIntLE(rBuff,p):ByteArrayAccess.getIntBE(rBuff,p);
+        rBuffPos=p+4;
+        return v;
+    }
+    /**
+     * Write int to serialization buffer in big endian format
+     * @param i int to serialize
+     */
+    void w(int i){
+        ByteArrayAccess.putIntLE(wBuff,wBuffPos,i);
+        wBuffPos+=4;
+    }
+    /**
+     * Deserialize UUID from byte buffer
+     * @return Deserialized UUID
+     */
+    UUID rg(){
+        int p=rBuffPos;
+        UUID v=new UUID(ByteArrayAccess.getLongBE(rBuff,p),ByteArrayAccess.getLongBE(rBuff,p+8));
+        rBuffPos=p+16;
+        return v;
+    }
+    /**
+     * Write uuid to serialization buffer in big endian format
+     * @param uuid UUID to serialize
+     */
+    void w(UUID uuid){
+        if(ipcVersion<3)
+            throw new RuntimeException("Guid not valid pre kdb+3.0");
+        ByteArrayAccess.putLongBE(wBuff,wBuffPos,uuid.getMostSignificantBits());
+        ByteArrayAccess.putLongBE(wBuff,wBuffPos+8,uuid.getLeastSignificantBits());
+        wBuffPos+=16;
+    }
+    /**
+     * Deserialize long from byte buffer
+     * @return Deserialized long
+     */
+    long rj(){
+        int p=rBuffPos;
+        long v=isLittleEndian?ByteArrayAccess.getLongLE(rBuff,p):ByteArrayAccess.getLongBE(rBuff,p);
+        rBuffPos=p+8;
+        return v;
+    }
+    /**
+     * Write long to serialization buffer in big endian format
+     * @param j long to serialize
+     */
+    void w(long j){
+        ByteArrayAccess.putLongLE(wBuff,wBuffPos,j);
+        wBuffPos+=8;
+    }
+    /**
+     * Deserialize float from byte buffer
+     * @return Deserialized float
+     */
+    float re(){
+        return Float.intBitsToFloat(ri());
+    }
+    /**
+     * Write float to serialization buffer in big endian format
+     * @param e float to serialize
+     */
+    void w(float e){
+        w(Float.floatToIntBits(e));
+    }
+    /**
+     * Deserialize double from byte buffer
+     * @return Deserialized double
+     */
+    double rf(){
+        return Double.longBitsToDouble(rj());
+    }
+    /**
+     * Write double to serialization buffer in big endian format
+     * @param f double to serialize
+     */
+    void w(double f){
+        w(Double.doubleToLongBits(f));
+    }
+    /**
+     * Deserialize Month from byte buffer
+     * @return Deserialized Month
+     */
+    Month rm(){
+        return new Month(ri());
+    }
+    /**
+     * Write Month to serialization buffer in big endian format
+     * @param m Month to serialize
+     */
+    void w(Month m){
+        w(m.i);
+    }
+    /**
+     * Deserialize Minute from byte buffer
+     * @return Deserialized Minute
+     */
+    Minute ru(){
+        return new Minute(ri());
+    }
+    /**
+     * Write Minute to serialization buffer in big endian format
+     * @param u Minute to serialize
+     */
+    void w(Minute u){
+        w(u.i);
+    }
+    /**
+     * Deserialize Second from byte buffer
+     * @return Deserialized Second
+     */
+    Second rv(){
+        return new Second(ri());
+    }
+    /**
+     * Write Second to serialization buffer in big endian format
+     * @param v Second to serialize
+     */
+    void w(Second v){
+        w(v.i);
+    }
+    /**
+     * Deserialize Timespan from byte buffer
+     * @return Deserialized Timespan
+     */
+    Timespan rn(){
+        return new Timespan(rj());
+    }
+    /**
+     * Write Timespan to serialization buffer in big endian format
+     * @param n Timespan to serialize
+     */
+    void w(Timespan n){
+        if(ipcVersion<1)
+            throw new RuntimeException("Timespan not valid pre kdb+2.6");
+        w(n.j);
+    }
+
+    static final int DAYS_BETWEEN_1970_2000 = 10957;
+    static final long SECONDS_BETWEEN_1970_2000 = 946684800L;
+    static final long MILLS_IN_DAY = 86400000L;
+    static final long MILLS_BETWEEN_1970_2000=MILLS_IN_DAY*DAYS_BETWEEN_1970_2000;
+    static final long NANOS_IN_SEC=1000000000L;
+
+    /**
+     * Deserialize date from byte buffer
+     * @return Deserialized date
+     */
+    LocalDate rd(){
+        int dateAsInt=ri();
+        return (dateAsInt==ni?LocalDate.MIN:LocalDate.ofEpochDay(10957L+dateAsInt));
+    }
+    private static int convertLocalDate(LocalDate d){
+        if (d==LocalDate.MIN)
+            return ni;
+        long daysSince2000=d.toEpochDay()-DAYS_BETWEEN_1970_2000;
+        if (daysSince2000<Integer.MIN_VALUE||daysSince2000>Integer.MAX_VALUE)
+            throw new RuntimeException("LocalDate epoch day since 2000 must be >= Integer.MIN_VALUE and <= Integer.MAX_VALUE");
+        return (int)daysSince2000;
+    }
+    /**
+     * Write LocalDate to serialization buffer in big endian format
+     * @param d Date to serialize
+     */
+    void w(LocalDate d){
+        w(convertLocalDate(d));
+    }
+    /**
+     * Deserialize time from byte buffer
+     * @return Deserialized time
+     */
+    LocalTime rt(){
+        int v=ri();
+        // 86,400,00 is the max ms for LocalTime (24:00:00), after that we circle back to 00:00:00
+        if(v==ni)
+            return LOCAL_TIME_NULL;
+        long millis=v;
+        if(millis<0)
+            millis=-millis;
+        if(millis>=MILLS_IN_DAY)
+            millis%=MILLS_IN_DAY;
+        return LocalTime.ofNanoOfDay(millis*1_000_000L);
+    }
+    private static int convertLocalTime(LocalTime v){
+        return (v==LOCAL_TIME_NULL)?ni:v.toSecondOfDay()*1000+v.getNano()/1_000_000;
+    }
+    /**
+     * Write LocalTime to serialization buffer in big endian format
+     * @param t Time to serialize
+     */
+    void w(LocalTime t){
+        w(convertLocalTime(t));
+    }
+    /**
+     * Deserialize LocalDateTime from byte buffer
+     * @return Deserialized date
+     */
+    LocalDateTime rz(){
+        double f=rf();
+        if(Double.isNaN(f))
+            return LocalDateTime.MIN;
+        long millisSince2000=Math.round(MILLS_IN_DAY*f);
+        long daysSince2000=Math.floorDiv(millisSince2000,MILLS_IN_DAY);
+        long millisOfDay=millisSince2000-daysSince2000*MILLS_IN_DAY;
+        return LocalDateTime.of(LocalDate.ofEpochDay(DAYS_BETWEEN_1970_2000+daysSince2000),LocalTime.ofNanoOfDay(millisOfDay*1_000_000L));
+    }
+    private static double convertLocalDateTime(LocalDateTime z){
+        if (z==LocalDateTime.MIN)
+            return nf;
+        LocalTime t=z.toLocalTime();
+        long millisSince2000=(z.toLocalDate().toEpochDay()-DAYS_BETWEEN_1970_2000)*MILLS_IN_DAY
+                +(long)t.toSecondOfDay()*1000+t.getNano()/1_000_000;
+        return millisSince2000/86_400_000d;
+    }
+    /**
+     * Write Date to serialization buffer in big endian format (only millisecond support)
+     * @param z Date to serialize
+     */
+    void w(LocalDateTime z){
+        w(convertLocalDateTime(z));
+    }
+    /**
+     * Deserialize Instant from byte buffer
+     * @return Deserialized timestamp
+     */
+    Instant rp(){
+        long timeAsLong=rj();
+        if(timeAsLong==nj)
+            return Instant.MIN;
+        long d=timeAsLong<0?(timeAsLong+1)/NANOS_IN_SEC-1:timeAsLong/NANOS_IN_SEC;
+        return Instant.ofEpochMilli(MILLS_BETWEEN_1970_2000+1000*d).plusNanos((int)(timeAsLong-NANOS_IN_SEC*d));
+    }
+    private static long convertInstant(Instant v){
+        return v==Instant.MIN?nj:(v.getEpochSecond()-SECONDS_BETWEEN_1970_2000)*1_000_000_000L+v.getNano();
+    }
+    /**
+     * Write Instant to serialization buffer in big endian format
+     * @param p Instant to serialize
+     */
+    void w(Instant p){
+        if(ipcVersion<1)
+            throw new RuntimeException("Instant not valid pre kdb+2.6");
+        w(convertInstant(p));
+    }
+    /**
+     * Deserialize string from byte buffer
+     * @return Deserialized string using registered encoding
+     * @throws UnsupportedEncodingException If there is an issue with the registed encoding
+     */
+    String rs() throws UnsupportedEncodingException{
+        int startPos=rBuffPos;
+        while(rBuffPos<rBuff.length&&rBuff[rBuffPos]!=0)
+            rBuffPos++;
+        if(rBuffPos>=rBuff.length)
+            throw new RuntimeException("Malformed message: symbol at offset "+startPos+" is not null-terminated");
+        String str=(startPos==rBuffPos)?"":new String(rBuff,startPos,rBuffPos-startPos,encoding);
+        rBuffPos++; // skip the null terminator
+        return str;
+    }
+    /**
+     * Write String to serialization buffer
+     * @param s String to serialize
+     * @throws UnsupportedEncodingException If there is an issue with the registed encoding
+     */
+    void w(String s) throws UnsupportedEncodingException{
+        if(s!=null){
+            int byteLen=0;
+            if(-1<(byteLen=s.indexOf('\000')))
+                s=s.substring(0,byteLen);
+            byte[] bytes=s.getBytes(encoding);
+            System.arraycopy(bytes,0,wBuff,wBuffPos,bytes.length);
+            wBuffPos+=bytes.length;
+        }
+        wBuff[wBuffPos++]=0;
+    }
+    /**
+     * Deserializes the contents of the incoming message buffer {@code b}.
+     * @return deserialised object
+     * @throws UnsupportedEncodingException If the named charset is not supported
+     */
+    Object r() throws UnsupportedEncodingException{
+        int i=0;
+        int n;
+        int t=rBuff[rBuffPos++];
+        if(t<0)
+            switch(t){
+                case -1:
+                    return rb();
+                case (-2):
+                    return rg();
+                case -4:
+                    return rBuff[rBuffPos++];
+                case -5:
+                    return rh();
+                case -6:
+                    return ri();
+                case -7:
+                    return rj();
+                case -8:
+                    return re();
+                case -9:
+                    return rf();
+                case -10:
+                    return rc();
+                case -11:
+                    return rs();
+                case -12:
+                    return rp();
+                case -13:
+                    return rm();
+                case -14:
+                    return rd();
+                case -15:
+                    return rz();
+                case -16:
+                    return rn();
+                case -17:
+                    return ru();
+                case -18:
+                    return rv();
+                case -19:
+                    return rt();
+            }
+        if(t>99){
+            if(t==100){
+                rs();
+                return r();
+            }
+            if(t<104)
+                return rBuff[rBuffPos++]==0&&t==101?null:"func";
+            if(t>105)
+                r();
+            else
+                for(n=ri();i<n;i++)
+                    r();
+            return "func";
+        }
+        if(t==99)
+            return new Dict(r(),r());
+        rBuffPos++;
+        if(t==98)
+            return new Flip((Dict)r());
+        n=ri();
+        switch(t){
+            case 0:
+                Object[] objArr=new Object[n];
+                for(;i<n;i++)
+                    objArr[i]=r();
+                return objArr;
+            case 1:
+                boolean[] boolArr=new boolean[n];
+                i=rBuffPos;
+                byte[] b=rBuff;
+                for(int j=0;j<n;j++)
+                    boolArr[j]=b[i++]!=0;
+                rBuffPos=i;
+                return boolArr;
+            case 2:
+                UUID[] uuidArr=new UUID[n];
+                i=rBuffPos;
+                for(int j=0;j<n;j++){
+                    long msb=ByteArrayAccess.getLongBE(rBuff,i);
+                    long lsb=ByteArrayAccess.getLongBE(rBuff,i+8);
+                    uuidArr[j]=new UUID(msb,lsb);
+                    i+=16;
+                }
+                rBuffPos=i;
+                return uuidArr;
+            case 4:
+                byte[] byteArr = Arrays.copyOfRange(rBuff, rBuffPos, rBuffPos + n);
+                rBuffPos += n;
+                return byteArr;
+            case 5:
+                short[] shortArr=new short[n];
+                ByteArrayAccess.getShorts(rBuff,rBuffPos,shortArr,isLittleEndian);
+                rBuffPos+=n*2;
+                return shortArr;
+            case 6:
+                int[] intArr=new int[n];
+                ByteArrayAccess.getInts(rBuff,rBuffPos,intArr,isLittleEndian);
+                rBuffPos+=n*4;
+                return intArr;
+            case 7:
+                long[] longa=new long[n];
+                ByteArrayAccess.getLongs(rBuff,rBuffPos,longa,isLittleEndian);
+                rBuffPos+=n*8;
+                return longa;
+            case 8:
+                float[] floatArr=new float[n];
+                ByteArrayAccess.getFloats(rBuff,rBuffPos,floatArr,isLittleEndian);
+                rBuffPos += n*4;
+                return floatArr;
+            case 9:
+                double[] doubleArr=new double[n];
+                ByteArrayAccess.getDoubles(rBuff,rBuffPos,doubleArr,isLittleEndian);
+                rBuffPos += n*8;
+                return doubleArr;
+            case 10:
+                char[] charArr=new String(rBuff,rBuffPos,n,encoding).toCharArray();
+                rBuffPos+=n;
+                return charArr;
+            case 11:
+                String[] stringArr=new String[n];
+                for(;i<n;i++)
+                    stringArr[i]=rs();
+                return stringArr;
+            case 12:
+                Instant[] timestampArr=new Instant[n];
+                for(;i<n;i++)
+                    timestampArr[i]=rp();
+                return timestampArr;
+            case 13:
+                Month[] monthArr=new Month[n];
+                for(;i<n;i++)
+                    monthArr[i]=rm();
+                return monthArr;
+            case 14:
+                LocalDate[] dateArr=new LocalDate[n];
+                for(;i<n;i++)
+                    dateArr[i]=rd();
+                return dateArr;
+            case 15:
+                LocalDateTime[] dateUtilArr=new LocalDateTime[n];
+                for(;i<n;i++)
+                    dateUtilArr[i]=rz();
+                return dateUtilArr;
+            case 16:
+                Timespan[] timespanArr=new Timespan[n];
+                for(;i<n;i++)
+                    timespanArr[i]=rn();
+                return timespanArr;
+            case 17:
+                Minute[] minArr=new Minute[n];
+                for(;i<n;i++)
+                    minArr[i]=ru();
+                return minArr;
+            case 18:
+                Second[] secArr=new Second[n];
+                for(;i<n;i++)
+                    secArr[i]=rv();
+                return secArr;
+            case 19:
+                LocalTime[] timeArr=new LocalTime[n];
+                for(;i<n;i++)
+                    timeArr[i]=rt();
+                return timeArr;
+            default:
+                // An unhandled type (e.g. an enumeration, types 20-76) must fail loudly: silently returning
+                // null would drop the value and, worse, leave the read buffer misaligned so the remainder of
+                // any containing list/dict/table would deserialize as garbage.
+                throw new RuntimeException("Unable to deserialize unsupported kdb+ type: "+t
+                        +". Types 20-76 are enumerations; resolve them with `value` on the kdb+ side before sending.");
+        }
+    }
+
+//object.getClass().isArray()   t(int[]) is .5 isarray is .1 lookup .05
+    /**
+     * Gets the numeric type of the supplied object used in kdb+ (distict supported data types in KDB+ can be identified by a numeric).&nbsp;
+     * See data type reference <a href="https://code.kx.com/q/basics/datatypes/">https://code.kx.com/q/basics/datatypes/</a>.
+     * For example, an object of type java.lang.Integer provides a numeric type of -6.
+     * @param x Object to get the numeric type of
+     * @return kdb+ type number for an object
+     */
+    public static int t(final Object x){
+        if (x==null)
+            return 101; // kdb+ generic null (::)
+        if (x instanceof Boolean)
+            return -1;
+        if (x instanceof UUID)
+            return -2;
+        if (x instanceof Byte)
+            return -4;
+        if (x instanceof Short)
+            return -5;
+        if (x instanceof Integer)
+            return -6;
+        if (x instanceof Long)
+            return -7;
+        if (x instanceof Float)
+            return -8;
+        if (x instanceof Double)
+            return -9;
+        if (x instanceof Character)
+            return -10;
+        if (x instanceof String)
+            return -11;
+        if (x instanceof LocalDate)
+            return -14;
+        if (x instanceof LocalTime)
+            return -19;
+        if (x instanceof Instant)
+            return -12;
+        if (x instanceof LocalDateTime)
+            return -15;
+        if (x instanceof Timespan)
+            return -16;
+        if (x instanceof Month)
+            return -13;
+        if (x instanceof Minute)
+            return -17;
+        if (x instanceof Second)
+            return -18;
+        if (x instanceof boolean[])
+            return 1;
+        if (x instanceof UUID[])
+            return 2;
+        if (x instanceof byte[])
+            return 4;
+        if (x instanceof short[])
+            return 5;
+        if (x instanceof int[])
+            return 6;
+        if (x instanceof long[])
+            return 7;
+        if (x instanceof float[])
+            return 8;
+        if (x instanceof double[])
+            return 9;
+        if (x instanceof char[])
+            return 10;
+        if (x instanceof String[])
+            return 11;
+        if (x instanceof LocalDate[])
+            return 14;
+        if (x instanceof LocalTime[])
+            return 19;
+        if (x instanceof Instant[])
+            return 12;
+        if (x instanceof LocalDateTime[])
+            return 15;
+        if (x instanceof Timespan[])
+            return 16;
+        if (x instanceof Month[])
+            return 13;
+        if (x instanceof Minute[])
+            return 17;
+        if (x instanceof Second[])
+            return 18;
+        if (x instanceof Flip)
+            return 98;
+        if (x instanceof Dict)
+            return 99;
+        return 0;
+    }
+    /**
+     * "number of bytes from type." A helper for nx, to assist in calculating the number of bytes required to serialize a
+     * particular type.
+     */
+    static int[] nt={0,1,16,0,1,2,4,8,4,8,1,0,8,4,4,8,8,4,4,4};
+    /**
+     * A helper function for nx, calculates the number of bytes which would be required to serialize the supplied string.
+     * @param s String to be serialized
+     * @return number of bytes required to serialise a string
+     */
+    static int ns(String s){
+        if(s==null)
+            return 0;
+        int end=s.indexOf('\0');
+        if(end<0)
+            end=s.length();
+        if(StandardCharsets.ISO_8859_1.equals(encoding)){
+            boolean latin1=true;
+            for(int i=0;i<end;i++){
+                if(s.charAt(i)>0xff){
+                    latin1=false;
+                    break;
+                }
+            }
+            if(latin1)
+                return end;
+        }
+        String v=end==s.length()?s:s.substring(0,end);
+        return v.getBytes(encoding).length;
+    }
+    /**
+     * A helper function used by nx which returns the number of elements in the supplied object
+     * (for example: the number of keys in a Dict, the number of rows in a Flip,
+     * the length of the array if its an array type)
+     * @param x Object to be serialized
+     * @return number of elements in an object.
+     * @throws UnsupportedEncodingException  If the named charset is not supported
+     */
+    public static int n(final Object x) throws UnsupportedEncodingException{
+        if (x instanceof Dict)
+            return n(((Dict)x).x);
+        if (x instanceof Flip)
+            return n(((Flip)x).y[0]);
+        if(x instanceof char[]){
+            char[] a=(char[])x;
+            if(StandardCharsets.ISO_8859_1.equals(encoding)){
+                boolean latin1=true;
+                for(char v:a){
+                    if(v>0xff){
+                        latin1=false;
+                        break;
+                    }
+                }
+                if(latin1)
+                    return a.length;
+            }
+            return new String(a).getBytes(encoding).length;
+        }
+        return Array.getLength(x);
+    }
+    /**
+     * Calculates the number of bytes which would be required to serialize the supplied object.
+     * @param x Object to be serialized
+     * @return number of bytes required to serialise an object.
+     * @throws UnsupportedEncodingException  If the named charset is not supported
+     */
+    public int nx(Object x) throws UnsupportedEncodingException{
+        int type=t(x);
+        if(type==101)
+            return 2; // kdb+ generic null (::): a 1 byte type code plus 1 byte of data
+        if(type==99)
+            return 1+nx(((Dict)x).x)+nx(((Dict)x).y);
+        if(type==98)
+            return 3+nx(((Flip)x).x)+nx(((Flip)x).y);
+        if(type<0)
+            return type==-11?2+ns((String)x):1+nt[-type];
+        int numBytes=6;
+        int numElements=n(x);
+        if(type==0||type==11)
+            for(int idx=0;idx<numElements;++idx)
+                numBytes+=type==0?nx(((Object[])x)[idx]):1+ns(((String[])x)[idx]);
+        else
+            numBytes+=numElements*nt[type];
+        return numBytes;
+    }
+
+    /**
+     * Serialize object in big endian format
+     * @param x Object to serialize
+     * @throws UnsupportedEncodingException If the named charset (encoding) is not supported
+     */
+    void w(Object x) throws UnsupportedEncodingException{
+        int i=0;
+        int n;
+        int type=t(x);
+        w((byte)type);
+        if(type<0)
+            switch(type){
+                case -1:
+                    w(((Boolean)x).booleanValue());
+                    return;
+                case -2:
+                    w((UUID)x);
+                    return;
+                case -4:
+                    w(((Byte)x).byteValue());
+                    return;
+                case -5:
+                    w(((Short)x).shortValue());
+                    return;
+                case -6:
+                    w(((Integer)x).intValue());
+                    return;
+                case -7:
+                    w(((Long)x).longValue());
+                    return;
+                case -8:
+                    w(((Float)x).floatValue());
+                    return;
+                case -9:
+                    w(((Double)x).doubleValue());
+                    return;
+                case -10:
+                    w(((Character)x).charValue());
+                    return;
+                case -11:
+                    w((String)x);
+                    return;
+                case -12:
+                    w((Instant)x);
+                    return;
+                case -13:
+                    w((Month)x);
+                    return;
+                case -14:
+                    w((LocalDate)x);
+                    return;
+                case -15:
+                    w((LocalDateTime)x);
+                    return;
+                case -16:
+                    w((Timespan)x);
+                    return;
+                case -17:
+                    w((Minute)x);
+                    return;
+                case -18:
+                    w((Second)x);
+                    return;
+                case -19:
+                    w((LocalTime)x);
+                    return;
+            }
+        if(type==101){ // kdb+ generic null (::) is followed by a single 0 byte
+            w((byte)0);
+            return;
+        }
+        if(type==99){
+            Dict r=(Dict)x;
+            w(r.x);
+            w(r.y);
+            return;
+        }
+        wBuff[wBuffPos++]=0;
+        if(type==98){
+            Flip r=(Flip)x;
+            wBuff[wBuffPos++]=99;
+            w(r.x);
+            w(r.y);
+            return;
+        }
+        n=n(x);
+        w(n);
+        switch(type){
+            case 0:
+                Object[] obja=(Object[])x;
+                for(Object v:obja)
+                    w(v);
+                return;
+            case 1:
+                boolean[] boola=(boolean[])x;
+                i=wBuffPos;
+                for(boolean v:boola)
+                    wBuff[i++]=(byte)(v?1:0);
+                wBuffPos=i;
+                return;
+            case 2:
+                if(ipcVersion<3)
+                    throw new RuntimeException("Guid not valid pre kdb+3.0");
+                UUID[] uuida=(UUID[])x;
+                i=wBuffPos;
+                for(UUID v:uuida){
+                    ByteArrayAccess.putLongBE(wBuff,i,v.getMostSignificantBits());
+                    i+=8;
+                    ByteArrayAccess.putLongBE(wBuff,i,v.getLeastSignificantBits());
+                    i+=8;
+                }
+                wBuffPos=i;
+                return;
+            case 4:
+                byte[] bytea=(byte[])x;
+                System.arraycopy(bytea,0,wBuff,wBuffPos,bytea.length);
+                wBuffPos+=bytea.length;
+                return;
+            case 5:
+                short[] shorta=(short[])x;
+                ByteArrayAccess.putShortsLE(wBuff,wBuffPos,shorta);
+                wBuffPos+=shorta.length*2;
+                return;
+            case 6:
+                int[] inta=(int[])x;
+                ByteArrayAccess.putIntsLE(wBuff,wBuffPos,inta);
+                wBuffPos+=inta.length*4;
+                return;
+            case 7:
+                long[] longa=(long[])x;
+                ByteArrayAccess.putLongsLE(wBuff,wBuffPos,longa);
+                wBuffPos+=longa.length*8;
+                return;
+            case 8:
+                float[] floata=(float[])x;
+                ByteArrayAccess.putFloatsLE(wBuff,wBuffPos,floata);
+                wBuffPos+=floata.length*4;
+                return;
+            case 9:
+                double[] doublea=(double[])x;
+                ByteArrayAccess.putDoublesLE(wBuff,wBuffPos,doublea);
+                wBuffPos+=doublea.length*8;
+                return;
+            case 10:
+                byte[] chara=new String((char[])x).getBytes(encoding);
+                System.arraycopy(chara,0,wBuff,wBuffPos,chara.length);
+                wBuffPos+=chara.length;
+                return;
+            case 11:
+                String[] stringa=(String[])x;
+                for(String v:stringa)
+                    w(v);
+                return;
+            case 12:
+                if(ipcVersion<1)
+                    throw new RuntimeException("Instant not valid pre kdb+2.6");
+                Instant[] instanta=(Instant[])x;
+                i=wBuffPos;
+                for (Instant v:instanta) {
+                    ByteArrayAccess.putLongLE(wBuff,i,convertInstant(v));
+                    i += 8;
+                }
+                wBuffPos=i;
+                return;
+            case 13:
+                Month[] montha=(Month[])x;
+                i=wBuffPos;
+                for (Month v:montha) {
+                    ByteArrayAccess.putIntLE(wBuff,i,v.i);
+                    i += 4;
+                }
+                wBuffPos=i;
+                return;
+            case 14:
+                LocalDate[] localdatea=(LocalDate[])x;
+                i=wBuffPos;
+                for(LocalDate v:localdatea){
+                    ByteArrayAccess.putIntLE(wBuff,i,convertLocalDate(v));
+                    i += 4;
+                }
+                wBuffPos=i;
+                return;
+            case 15:
+                LocalDateTime[] localdatetimea=(LocalDateTime[])x;
+                i=wBuffPos;
+                for(LocalDateTime v:localdatetimea){
+                    ByteArrayAccess.putLongLE(wBuff,i,Double.doubleToLongBits(convertLocalDateTime(v)));
+                    i += 8;
+                }
+                wBuffPos=i;
+                return;
+            case 16:
+                if(ipcVersion<1)
+                    throw new RuntimeException("Timespan not valid pre kdb+2.6");
+                Timespan[] timespana=(Timespan[])x;
+                i=wBuffPos;
+                for (Timespan v:timespana) {
+                    ByteArrayAccess.putLongLE(wBuff,i,v.j);
+                    i += 8;
+                }
+                wBuffPos=i;
+                return;
+            case 17:
+                Minute[] minutea=(Minute[])x;
+                i=wBuffPos;
+                for (Minute v:minutea) {
+                    ByteArrayAccess.putIntLE(wBuff,i,v.i);
+                    i += 4;
+                }
+                wBuffPos=i;
+                return;
+            case 18:
+                Second[] seconda=(Second[])x;
+                i=wBuffPos;
+                for (Second v:seconda) {
+                    ByteArrayAccess.putIntLE(wBuff,i,v.i);
+                    i += 4;
+                }
+                wBuffPos=i;
+                return;
+            case 19:
+                LocalTime[] localtimea=(LocalTime[])x;
+                i=wBuffPos;
+                for (LocalTime v:localtimea) {
+                    ByteArrayAccess.putIntLE(wBuff,i,convertLocalTime(v));
+                    i += 4;
+                }
+                wBuffPos=i;
+                return;
+        }
+    }
+
+    /**
+     * Serialises {@code x} object as {@code byte[]} array.
+     * @param msgType type of the ipc message (0 – async, 1 – sync, 2 – response)
+     * @param x object to serialise
+     * @param zip true if to attempt compress serialised output (given uncompressed serialized data also has a length
+     * greater than 2000 bytes and connection is not localhost)
+     * @return {@code wBuff} containing serialised representation
+     *
+     * @throws IOException should not throw
+     */
+    public byte[] serialize(int msgType,Object x,boolean zip)throws IOException{
+        int length=8+nx(x);
+        synchronized(outStream){
+            wBuff=new byte[length];
+            wBuff[0]=1;  /* little endian */
+            wBuff[1]=(byte)msgType;
+            wBuffPos=4;
+            w(length);
+            w(x);
+            if(zip&&wBuffPos>2000&&!isLoopback)
+                compress();
+            return wBuff;
+        }
+    }
+
+    /**
+     * Deserialises {@code buffer} q ipc as an object
+     * @param buffer byte[] to deserialise object from
+     * @return deserialised object
+     * @throws KException if buffer contains kdb+ error object.
+     * @throws UnsupportedEncodingException  If the named charset is not supported
+     */
+    public Object deserialize(byte[]buffer)throws KException, UnsupportedEncodingException{
+        synchronized(inStream){
+            rBuff=buffer;
+            isLittleEndian=rBuff[0]==1;  // endianness of the msg
+            boolean compressed=rBuff[2]==1;
+            rBuffPos=8;
+            if(compressed)
+                uncompress();
+            if(rBuff[8]==-128){
+                rBuffPos=9;
+                throw new KException(rs());
+            }
+            return r(); // deserialize the message
+        }
+    }
+
+    private void write(byte[] buf) throws IOException{
+        if(channel==null)
+            outStream.write(buf);
+        else
+            channel.write(ByteBuffer.wrap(buf));
+    }
+
+    /**
+     * Serialize and write the data to the registered connection
+     * @param msgType The message type to use within the message (0 – async, 1 – sync, 2 – response)
+     * @param x The contents of the message
+     * @throws IOException due to an issue serializing/sending the provided data
+     */
+    protected void w(int msgType,Object x) throws IOException{
+        synchronized(outStream){
+            byte[] buffer=serialize(msgType,x,zip);
+            write(buffer);
+        }
+    }
+    /**
+     * Sends a response message to the remote kdb+ process. This should be called only during processing of an incoming sync message.
+     * @param obj Object to send to the remote
+     * @throws IOException if not expecting any response
+     */
+    public void kr(Object obj) throws IOException{
+        if(sync==0)
+            throw new IOException("Unexpected response msg");
+        sync--;
+        w(2,obj);
+    }
+    /**
+     * Sends an error as a response message to the remote kdb+ process. This should be called only during processing of an incoming sync message.
+     * @param text The error message text
+     * @throws IOException unexpected error message
+     */
+    public void ke(String text) throws IOException{
+        if(sync==0)
+            throw new IOException("Unexpected error msg");
+        sync--;
+        int n=2+ns(text)+8;
+        synchronized(outStream){
+            wBuff=new byte[n];
+            wBuff[0]=1; /* little endian */
+            wBuff[1]=2;
+            wBuffPos=4;
+            w(n);
+            w((byte)-128);
+            w(text);
+            write(wBuff);
+        }
+    }
+    /**
+     * Sends an async message to the remote kdb+ process. This blocks until the serialized data has been written to the
+     * socket. On return, there is no guarantee that this msg has already been processed by the remote process.
+     * @param expr The expression to send
+     * @throws IOException if an I/O error occurs.
+     */
+    public void ks(String expr) throws IOException{
+        w(0,expr.toCharArray());
+    }
+    /**
+     * Sends an async message to the remote kdb+ process. This blocks until the serialized data has been written to the
+     * socket. On return, there is no guarantee that this msg has already been processed by the remote process.
+     * @param obj The object to send
+     * @throws IOException if an I/O error occurs.
+     */
+    public void ks(Object obj) throws IOException{
+        w(0,obj);
+    }
+    /**
+     * Sends an async message to the remote kdb+ process. This blocks until the serialized data has been written to the
+     * socket. On return, there is no guarantee that this msg has already been processed by the remote process. Use this to
+     * invoke a function in kdb+ which takes a single argument and does not return a value. e.g. to invoke f[x] use
+     * ks("f",x); to invoke a lambda, use ks("{x}",x);
+     * @param s The name of the function, or a lambda itself
+     * @param x The argument to the function named in s
+     * @throws IOException if an I/O error occurs.
+     */
+    public void ks(String s,Object x) throws IOException{
+        Object[] a={s.toCharArray(),x};
+        w(0,a);
+    }
+    /**
+     * Sends an async message to the remote kdb+ process. This blocks until the serialized data has been written to the
+     * socket. On return, there is no guarantee that this msg has already been processed by the remote process. Use this to
+     * invoke a function in kdb+ which takes 2 arguments and does not return a value. e.g. to invoke f[x;y] use ks("f",x,y);
+     * to invoke a lambda, use ks("{x+y}",x,y);
+     * @param s The name of the function, or a lambda itself
+     * @param x The first argument to the function named in s
+     * @param y The second argument to the function named in s
+     * @throws IOException if an I/O error occurs.
+     */
+    public void ks(String s,Object x,Object y) throws IOException{
+        Object[] a={s.toCharArray(),x,y};
+        w(0,a);
+    }
+    /**
+     * Sends an async message to the remote kdb+ process. This blocks until the serialized data has been written to the
+     * socket. On return, there is no guarantee that this msg has already been processed by the remote process. Use this to
+     * invoke a function in kdb+ which takes 3 arguments and does not return a value. e.g. to invoke f[x;y;z] use
+     * ks("f",x,y,z); to invoke a lambda, use ks("{x+y+z}",x,y,z);
+     * @param s The name of the function, or a lambda itself
+     * @param x The first argument to the function named in s
+     * @param y The second argument to the function named in s
+     * @param z The third argument to the function named in s
+     * @throws IOException if an I/O error occurs.
+     */
+    public void ks(String s,Object x,Object y,Object z) throws IOException{
+        Object[] a={s.toCharArray(),x,y,z};
+        w(0,a);
+    }
+    /**
+     * Sends an async message to the remote kdb+ process. This blocks until the serialized data has been written to the
+     * socket. On return, there is no guarantee that this msg has already been processed by the remote process. Use this to
+     * invoke a function in kdb+ which takes 4 arguments and does not return a value. e.g. to invoke f[param1;param2;param3;param4] use
+     * ks("f",param1,param2,param3,param4); to invoke a lambda, use ks("{[param1;param2;param3;param4] param1+param2+param3+param4}",param1,param2,param3,param4);
+     * @param s The name of the function, or a lambda itself
+     * @param param1 The first argument to the function named in s
+     * @param param2 The second argument to the function named in s
+     * @param param3 The third argument to the function named in s
+     * @param param4 The fourth argument to the function named in s
+     * @throws IOException if an I/O error occurs.
+     */
+    public void ks(String s,Object param1, Object param2,Object param3,Object param4) throws IOException{
+        Object[] a={s.toCharArray(),param1,param2,param3,param4};
+        w(0,a);
+    }
+    /**
+     * Sends an async message to the remote kdb+ process. This blocks until the serialized data has been written to the
+     * socket. On return, there is no guarantee that this msg has already been processed by the remote process. Use this to
+     * invoke a function in kdb+ which takes 5 arguments and does not return a value. e.g. to invoke f[param1;param2;param3;param4;param5] use
+     * ks("f",param1,param2,param3,param4,param5); to invoke a lambda, use ks("{[param1;param2;param3;param4;param5] param1+param2+param3+param4+param5}",param1,param2,param3,param4,param5);
+     * @param s The name of the function, or a lambda itself
+     * @param param1 The first argument to the function named in s
+     * @param param2 The second argument to the function named in s
+     * @param param3 The third argument to the function named in s
+     * @param param4 The fourth argument to the function named in s
+     * @param param5 The fifth argument to the function named in s
+     * @throws IOException if an I/O error occurs.
+     */
+    public void ks(String s,Object param1, Object param2,Object param3,Object param4,Object param5) throws IOException{
+        Object[] a={s.toCharArray(),param1,param2,param3,param4,param5};
+        w(0,a);
+    }
+    /**
+     * Reads an incoming message from the remote kdb+ process. This blocks until a single message has been received and
+     * deserialized. This is called automatically during a sync request via k(String s,..). It can be called explicitly when
+     * subscribing to a publisher.
+     * @return an Object array of {messageType,deserialised object}
+     * @throws KException if response contains an error
+     * @throws IOException if an I/O error occurs or charset is not supported.
+     */
+    public Object[] readMsg() throws KException,IOException{
+        synchronized(inStream){
+            if(channel==null){
+                rBuff=new byte[8];
+                inStream.readFully(rBuff); // read the msg header
+            }else{
+                ByteBuffer buf=ByteBuffer.allocate(8);
+                while(0!=buf.remaining())if(-1==channel.read(buf))throw new java.io.EOFException("end of stream");
+                rBuff=buf.array();
+            }
+            isLittleEndian=rBuff[0]==1;  // endianness of the msg
+            if(rBuff[1]==1) // msg types are 0 - async, 1 - sync, 2 - response
+                sync++;   // an incoming sync message means the remote will expect a response message
+            rBuffPos=4;
+            if(channel==null){
+                rBuff=Arrays.copyOf(rBuff,ri());
+                inStream.readFully(rBuff,8,rBuff.length-8); // read the incoming message in full
+            }else{
+                ByteBuffer buf=ByteBuffer.allocate(ri());
+                buf.put(rBuff,0,rBuff.length);
+                while(0!=buf.remaining())if(-1==channel.read(buf))throw new java.io.EOFException("end of stream");
+                rBuff=buf.array();
+            }
+            return new Object[]{rBuff[1],deserialize(rBuff)};
+        }
+    }
+    /**
+     * Reads an incoming message from the remote kdb+ process. This blocks until a single message has been received and
+     * deserialized. This is called automatically during a sync request via k(String s,..). It can be called explicitly when
+     * subscribing to a publisher.
+     * @return the deserialised object
+     * @throws KException if response contains an error
+     * @throws IOException if an I/O error occurs or named charset is not supported
+     */
+    public Object k() throws KException,IOException{
+        return readMsg()[1];
+    }
+    /**
+     * MsgHandler interface for processing async or sync messages during a sync request whilst awaiting a response message
+     * which contains a default implementation
+     */
+    public interface MsgHandler{
+        /**
+         * The default implementation discards async messages, responds to sync messages with an error,
+         * otherwise the remote will continue to wait for a response
+         * @param c The c object that received the message
+         * @param msgType The type of the message received (0 – async, 1 – sync, 2 – response)
+         * @param msg The message contents
+         * @throws IOException Thrown when message type is unexpected (i.e isnt a sync or async message)
+         */
+        default void processMsg(c c,byte msgType,Object msg)throws IOException{
+            switch(msgType){
+                case 0:System.err.println("discarded unexpected incoming async msg!");break; // implicitly discard incoming async messages
+                case 1:c.ke("unable to process sync requests");break; // signal to remote that we're unable to process these by default
+                default:throw new IOException("Invalid message type received: "+msgType);
+            }
+        }
+    }
+    /**
+     * {@code msgHandler} is used for handling incoming async and sync messages whilst awaiting a response message to a sync request
+     */
+    private MsgHandler msgHandler=null;
+    /**
+     * Stores the handler in an instance variable
+     * @param handler The handler to store
+     */
+    public void setMsgHandler(MsgHandler handler){
+        msgHandler=handler;
+    }
+    /**
+     * Returns the current msg handler
+     * @return the current msg handler
+     */
+    public MsgHandler getMsgHandler(){
+        return msgHandler;
+    }
+    /**
+     * {@code collectResponseAsync} is used to indicate whether k() should leave the reading of the associated response message to the caller
+     * via readMsg();
+     */
+    private boolean collectResponseAsync;
+    /**
+     * Stores the boolean in an instance variable
+     * @param b The boolean to store
+     */
+    public void setCollectResponseAsync(boolean b){collectResponseAsync=b;}
+
+    /**
+     * Sends a sync message to the remote kdb+ process. This blocks until the message has been sent in full, and, if a MsgHandler
+     * is set, will process any queued, incoming async or sync message in order to reach the response message.
+     * If the caller has already indicated via {@code setCollectResponseAsync} that the response message will be read async, later, then return
+     * without trying to read any messages at this point; the caller can collect(read) the response message by calling readMsg();
+     * @param x The object to send
+     * @return deserialised response to request {@code x}
+     * @throws KException if request evaluation resulted in an error
+     * @throws IOException if an I/O error occurs.
+     */
+    public synchronized Object k(Object x) throws KException,IOException{
+        w(1,x);
+        if(collectResponseAsync)
+            return null;
+        while(true){
+            Object[]msg=readMsg();
+            if(msgHandler==null||(byte)msg[0]==(byte)2) // if there's no handler or the msg is a response msg, return it
+                return msg[1];
+            msgHandler.processMsg(this,(byte)msg[0],msg[1]); // process async and sync requests
+        }
+    }
+    /**
+     * Sends a sync message to the remote kdb+ process. This blocks until the message has been sent in full, and a message
+     * is received from the remote; typically the received message would be the corresponding response message.
+     * @param expr The expression to send
+     * @return deserialised response to request {@code x}
+     * @throws KException if request evaluation resulted in an error
+     * @throws IOException if an I/O error occurs.
+     */
+    public Object k(String expr) throws KException,IOException{
+        return k(expr.toCharArray());
+    }
+    /**
+     * Sends a sync message to the remote kdb+ process. This blocks until the message has been sent in full, and a message
+     * is received from the remote; typically the received message would be the corresponding response message. Use this to
+     * invoke a function in kdb+ which takes a single argument and returns a value. e.g. to invoke f[x] use k("f",x); to
+     * invoke a lambda, use k("{x}",x);
+     * @param s The name of the function, or a lambda itself
+     * @param x The argument to the function named in s
+     * @return deserialised response to request {@code s} with params {@code x}
+     * @throws KException if request evaluation resulted in an error
+     * @throws IOException if an I/O error occurs.
+     */
+    public Object k(String s,Object x) throws KException,IOException{
+        Object[] a={s.toCharArray(),x};
+        return k(a);
+    }
+    /**
+     * Sends a sync message to the remote kdb+ process. This blocks until the message has been sent in full, and a message
+     * is received from the remote; typically the received message would be the corresponding response message. Use this to
+     * invoke a function in kdb+ which takes arguments and returns a value. e.g. to invoke f[x;y] use k("f",x,y); to invoke
+     * a lambda, use k("{x+y}",x,y);
+     * @param s The name of the function, or a lambda itself
+     * @param x The first argument to the function named in s
+     * @param y The second argument to the function named in s
+     * @return deserialised response to the request
+     * @throws KException if request evaluation resulted in an error
+     * @throws IOException if an I/O error occurs.
+     */
+    public Object k(String s,Object x,Object y) throws KException,IOException{
+        Object[] a={s.toCharArray(),x,y};
+        return k(a);
+    }
+    /**
+     * Sends a sync message to the remote kdb+ process. This blocks until the message has been sent in full, and a message
+     * is received from the remote; typically the received message would be the corresponding response message. Use this to
+     * invoke a function in kdb+ which takes 3 arguments and returns a value. e.g. to invoke f[x;y;z] use k("f",x,y,z); to
+     * invoke a lambda, use k("{x+y+z}",x,y,z);
+     * @param s The name of the function, or a lambda itself
+     * @param x The first argument to the function named in s
+     * @param y The second argument to the function named in s
+     * @param z The third argument to the function named in s
+     * @return deserialised response to the request
+     * @throws KException if request evaluation resulted in an error
+     * @throws IOException if an I/O error occurs.
+     */
+    public Object k(String s,Object x,Object y,Object z) throws KException,IOException{
+        Object[] a={s.toCharArray(),x,y,z};
+        return k(a);
+    }
+    /**
+     * Sends a sync message to the remote kdb+ process. This blocks until the message has been sent in full, and a message
+     * is received from the remote; typically the received message would be the corresponding response message. Use this to
+     * invoke a function in kdb+ which takes 4 arguments and returns a value. e.g. to invoke f[param1;param2;param3;param4] use k("f",param1,param2,param3,param4); to
+     * invoke a lambda, use k("{[param1;param2;param3;param4] param1+param2+param3+param4}",param1,param2,param3,param4);
+     * @param s The name of the function, or a lambda itself
+     * @param param1 The first argument to the function named in s
+     * @param param2 The second argument to the function named in s
+     * @param param3 The third argument to the function named in s
+     * @param param4 The fourth argument to the function named in s
+     * @return deserialised response to the request
+     * @throws KException if request evaluation resulted in an error
+     * @throws IOException if an I/O error occurs.
+     */
+    public Object k(String s,Object param1,Object param2,Object param3,Object param4) throws KException,IOException{
+        Object[] a={s.toCharArray(),param1,param2,param3,param4};
+        return k(a);
+    }
+    /**
+     * Sends a sync message to the remote kdb+ process. This blocks until the message has been sent in full, and a message
+     * is received from the remote; typically the received message would be the corresponding response message. Use this to
+     * invoke a function in kdb+ which takes 5 arguments and returns a value. e.g. to invoke f[param1;param2;param3;param4;param5] use k("f",param1,param2,param3,param4, param5); to
+     * invoke a lambda, use k("{[param1;param2;param3;param4;param5] param1+param2+param3+param4+param5}",param1,param2,param3,param4);
+     * @param s The name of the function, or a lambda itself
+     * @param param1 The first argument to the function named in s
+     * @param param2 The second argument to the function named in s
+     * @param param3 The third argument to the function named in s
+     * @param param4 The fourth argument to the function named in s
+     * @param param5 The fourth argument to the function named in s
+     * @return deserialised response to the request
+     * @throws KException if request evaluation resulted in an error
+     * @throws IOException if an I/O error occurs.
+     */
+    public Object k(String s,Object param1,Object param2,Object param3,Object param4,Object param5) throws KException,IOException{
+        Object[] a={s.toCharArray(),param1,param2,param3,param4,param5};
+        return k(a);
+    }
+    /**
+     * Array containing the null object representation for corresponing kdb+ type number (0-19).&nbsp;
+     * See data type reference <a href="https://code.kx.com/q/basics/datatypes/">https://code.kx.com/q/basics/datatypes/</a>
+     * For example {@code "".equals(NULL[11])}
+     */
+    public static final Object[] NULL={null,Boolean.valueOf(false),new UUID(0,0),null,Byte.valueOf((byte)0),Short.valueOf(Short.MIN_VALUE),Integer.valueOf(ni),Long.valueOf(nj),Float.valueOf((float)nf),Double.valueOf(nf),Character.valueOf(' '),"",
+            Instant.MIN,new Month(ni),LocalDate.MIN,LocalDateTime.MIN,new Timespan(nj),new Minute(ni),new Second(ni),LOCAL_TIME_NULL
+    };
+    /**
+     * Gets a null object for the type indicated by the character.&nbsp;
+     * See data type reference <a href="https://code.kx.com/q/basics/datatypes/">https://code.kx.com/q/basics/datatypes/</a>
+     * @param c The shorthand character for the type
+     * @return instance of null object of specified kdb+ type.
+     */
+    public static Object NULL(char c){
+        return NULL[" bg xhijefcspmdznuvt".indexOf(c)];
+    }
+    /**
+     * Tests whether an object represents a KDB+ null for its type, for example
+     * qn(NULL('j')) should return true
+     * @param x The object to be tested for null
+     * @return true if {@code x} is kdb+ null, false otherwise
+     */
+    public static boolean qn(Object x){
+        int t=-t(x);
+        return (t==2||t>4)&&x.equals(NULL[t]);
+    }
+    /**
+     * Gets the object at an index of a given array, if its a valid type used by the KDB+ interface.
+     * @param x The array to index
+     * @param i The offset to index at
+     * @return object at index, or null if the object value represents
+     * a KDB+ null value for its type
+     */
+    public static Object at(Object x,int i){
+        x=Array.get(x,i);
+        return qn(x)?null:x;
+    }
+    /**
+     * Sets the object at an index of an array.
+     * @param x The array to index
+     * @param i The offset to index at
+     * @param y The object to set at index i. null can be used if you wish
+     * to set the KDB+ null representation of the type (e.g. null would populate
+     * an empty string if x was an array of Strings)
+     */
+    public static void set(Object x,int i,Object y){
+        Array.set(x,i,null==y?NULL[t(x)]:y);
+    }
+    /**
+     * Finds index of string in an array
+     * @param x String array to search
+     * @param y The String to locate in the array
+     * @return The index at which the String resides
+     */
+    static int find(String[] x,String y){
+        int i=0;
+        while(i<x.length&&!x[i].equals(y))
+            ++i;
+        return i;
+    }
+    /**
+     * Removes the key from a keyed table.
+     * <p>
+     * A keyed table(a.k.a. Flip) is a dictionary where both key and value are tables
+     * themselves. For ease of processing, this method, td, table from dictionary, can be used to remove the key.
+     * </p>
+     * @param tbl A table or keyed table.
+     * @return A simple table
+     * @throws UnsupportedEncodingException If the named charset is not supported
+     */
+    public static Flip td(Object tbl) throws UnsupportedEncodingException{
+        if(tbl instanceof Flip)
+            return (Flip)tbl;
+        Dict d=(Dict)tbl;
+        Flip a=(Flip)d.x;
+        Flip b=(Flip)d.y;
+        int m=n(a.x);
+        int n=n(b.x);
+        String[] x=new String[m+n];
+        System.arraycopy(a.x,0,x,0,m);
+        System.arraycopy(b.x,0,x,m,n);
+        Object[] y=new Object[m+n];
+        System.arraycopy(a.y,0,y,0,m);
+        System.arraycopy(b.y,0,y,m,n);
+        return new Flip(new Dict(x,y));
+    }
+    /**
+     * Creates a string from int with left padding of 0s, if less than 2 digits
+     * @param i Integer to convert to string
+     * @return String representation of int with zero padding
+     */
+    static String i2(int i){
+        return new DecimalFormat("00",DecimalFormatSymbols.getInstance(Locale.ROOT)).format(i);
+    }
+    /**
+     * Creates a string from int with left padding of 0s, if less than 9 digits
+     * @param i Integer to convert to string
+     * @return String representation of int with zero padding
+     */
+    static String i9(int i){
+        return new DecimalFormat("000000000",DecimalFormatSymbols.getInstance(Locale.ROOT)).format(i);
+    }
+}

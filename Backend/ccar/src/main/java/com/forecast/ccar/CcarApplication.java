@@ -1,6 +1,6 @@
-package com.example.ccar;
+package com.forecast.ccar;
 
-import com.example.ccar.service.BuHierarchyService;
+import com.forecast.ccar.service.BuHierarchyService;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
