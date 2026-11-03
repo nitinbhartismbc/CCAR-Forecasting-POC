@@ -1,7 +1,7 @@
 package com.iris.kdb.pool;
 
 import com.iris.kdb.config.KdbProperties;
-import kx.c;
+import com.kx.c;
 
 import org.apache.commons.pool2.BasePooledObjectFactory;
 import org.apache.commons.pool2.PooledObject;

@@ -10,7 +10,7 @@ import java.io.IOException;
 import java.lang.reflect.Array;
 import java.util.*;
 
-import com.forecast.ccar.kx.c;
+import com.kx.c;
 
 @Service
 public class KdbService {
