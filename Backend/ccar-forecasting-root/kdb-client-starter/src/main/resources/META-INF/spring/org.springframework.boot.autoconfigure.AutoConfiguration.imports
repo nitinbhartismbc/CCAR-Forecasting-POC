@@ -1,0 +1,2 @@
+com.iris.kdb.config.KdbAutoConfiguration
+com.iris.kdb.logging.KdbLoggingAutoConfiguration

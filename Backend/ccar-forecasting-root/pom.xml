@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- Spring Boot parent gives plugin config, resource filtering and the Boot BOM to all children -->
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>4.1.2</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.ccar</groupId>
+    <artifactId>ccar-forecasting-parent</artifactId>
+    <version>1.0.0</version>
+    <packaging>pom</packaging>
+    <name>ccar-forecasting-parent</name>
+    <description>Root parent / aggregator for the CCAR Forecasting microservices</description>
+
+    <properties>
+        <java.version>21</java.version>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!-- Internal modules -->
+        <kdb-starter.version>1.0.0</kdb-starter.version>
+
+        <!-- Third-party versions not managed by Spring Boot -->
+        <opencsv.version>5.9</opencsv.version>
+        <springdoc.version>3.0.3</springdoc.version>
+        <commons-pool2.version>2.12.1</commons-pool2.version>
+        <javakdb.version>2.2</javakdb.version>
+    </properties>
+
+    <!-- Build order is resolved by the reactor: kdb-client-starter is built before ccar -->
+    <modules>
+        <module>kdb-client-starter</module>
+        <module>ccar-core</module>
+        <!-- Aggregated only: still inherits spring-boot-starter-parent 3.4.5 because
+             Spring Cloud 2024.0.x (Gateway) does not support Spring Boot 4.x -->
+        <module>ccar-api-gateway</module>
+    </modules>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>com.iris.kdb</groupId>
+                <artifactId>kdb-starter</artifactId>
+                <version>${kdb-starter.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.opencsv</groupId>
+                <artifactId>opencsv</artifactId>
+                <version>${opencsv.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.springdoc</groupId>
+                <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+                <version>${springdoc.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-pool2</artifactId>
+                <version>${commons-pool2.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.kx</groupId>
+                <artifactId>javakdb</artifactId>
+                <version>${javakdb.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+</project>

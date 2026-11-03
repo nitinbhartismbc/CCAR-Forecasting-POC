@@ -1,0 +1,133 @@
+2026-11-03T16:41:31.613+05:30  INFO 33788 --- [ccar-api-gateway] [main] c.c.c.CcarApiGatewayApplication          : Starting CcarApiGatewayApplication v0.0.1-SNAPSHOT using Java 21.0.2 with PID 33788 (D:\SMBC-CCAR-POC\CCAR-Forecasting-POC\Backend\ccar-api-gateway\target\ccar-api-gateway-0.0.1-SNAPSHOT.jar started by nitin.bharti in D:\SMBC-CCAR-POC\CCAR-Forecasting-POC\Backend\ccar-api-gateway)
+2026-11-03T16:41:31.622+05:30  INFO 33788 --- [ccar-api-gateway] [main] c.c.c.CcarApiGatewayApplication          : No active profile set, falling back to 1 default profile: "default"
+2026-11-03T16:41:34.187+05:30  INFO 33788 --- [ccar-api-gateway] [main] o.s.cloud.context.scope.GenericScope     : BeanFactory id=b8bbf2f9-1b2f-338a-b465-d7983637637f
+2026-11-03T16:41:36.704+05:30  INFO 33788 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [After]
+2026-11-03T16:41:36.705+05:30  INFO 33788 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Before]
+2026-11-03T16:41:36.706+05:30  INFO 33788 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Between]
+2026-11-03T16:41:36.706+05:30  INFO 33788 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Cookie]
+2026-11-03T16:41:36.707+05:30  INFO 33788 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Header]
+2026-11-03T16:41:36.707+05:30  INFO 33788 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Host]
+2026-11-03T16:41:36.707+05:30  INFO 33788 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Method]
+2026-11-03T16:41:36.708+05:30  INFO 33788 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Path]
+2026-11-03T16:41:36.708+05:30  INFO 33788 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Query]
+2026-11-03T16:41:36.709+05:30  INFO 33788 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [ReadBody]
+2026-11-03T16:41:36.709+05:30  INFO 33788 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [RemoteAddr]
+2026-11-03T16:41:36.709+05:30  INFO 33788 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [XForwardedRemoteAddr]
+2026-11-03T16:41:36.711+05:30  INFO 33788 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Weight]
+2026-11-03T16:41:36.711+05:30  INFO 33788 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [CloudFoundryRouteService]
+2026-11-03T16:41:38.159+05:30  INFO 33788 --- [ccar-api-gateway] [main] o.s.b.web.embedded.netty.NettyWebServer  : Netty started on port 8089 (http)
+2026-11-03T16:41:38.322+05:30  INFO 33788 --- [ccar-api-gateway] [main] c.c.c.CcarApiGatewayApplication          : Started CcarApiGatewayApplication in 7.821 seconds (process running for 8.675)
+2026-11-03T16:41:39.506+05:30  INFO 33788 --- [ccar-api-gateway] [reactor-http-nio-2] c.c.c.logging.RequestLoggingFilter       : [b443d30f-949f-46f9-84d2-f8e942b6f907] -> GET /ccar/forecast/bu-hierarchy
+2026-11-03T16:41:40.248+05:30  INFO 33788 --- [ccar-api-gateway] [reactor-http-nio-2] c.c.c.logging.RequestLoggingFilter       : [b443d30f-949f-46f9-84d2-f8e942b6f907] <- GET /ccar/forecast/bu-hierarchy route=ccar status=200 OK 740 ms
+2026-11-03T16:41:40.622+05:30  INFO 33788 --- [ccar-api-gateway] [reactor-http-nio-3] c.c.c.logging.RequestLoggingFilter       : [test-123] -> GET /ccar/forecast/bu-hierarchy
+2026-11-03T16:41:40.797+05:30  INFO 33788 --- [ccar-api-gateway] [reactor-http-nio-3] c.c.c.logging.RequestLoggingFilter       : [test-123] <- GET /ccar/forecast/bu-hierarchy route=ccar status=200 OK 173 ms
+2026-11-03T16:41:46.224+05:30  INFO 33788 --- [ccar-api-gateway] [reactor-http-nio-4] c.c.c.logging.RequestLoggingFilter       : [bc2a07fa-74f5-47d0-a88a-fd4cc6ce2fb2] -> GET /ccar/forecast/bu-hierarchy
+2026-11-03T16:41:46.272+05:30  INFO 33788 --- [ccar-api-gateway] [reactor-http-nio-4] c.c.c.logging.RequestLoggingFilter       : [bc2a07fa-74f5-47d0-a88a-fd4cc6ce2fb2] <- GET /ccar/forecast/bu-hierarchy route=ccar status=200 OK 47 ms
+2026-11-03T16:42:16.340+05:30  INFO 31800 --- [ccar-api-gateway] [main] c.c.c.CcarApiGatewayApplication          : Starting CcarApiGatewayApplication v0.0.1-SNAPSHOT using Java 21.0.2 with PID 31800 (D:\SMBC-CCAR-POC\CCAR-Forecasting-POC\Backend\ccar-api-gateway\target\ccar-api-gateway-0.0.1-SNAPSHOT.jar started by nitin.bharti in D:\SMBC-CCAR-POC\CCAR-Forecasting-POC\Backend\ccar-api-gateway)
+2026-11-03T16:42:16.348+05:30  INFO 31800 --- [ccar-api-gateway] [main] c.c.c.CcarApiGatewayApplication          : No active profile set, falling back to 1 default profile: "default"
+2026-11-03T16:42:18.159+05:30  INFO 31800 --- [ccar-api-gateway] [main] o.s.cloud.context.scope.GenericScope     : BeanFactory id=b8bbf2f9-1b2f-338a-b465-d7983637637f
+2026-11-03T16:42:20.382+05:30  INFO 31800 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [After]
+2026-11-03T16:42:20.383+05:30  INFO 31800 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Before]
+2026-11-03T16:42:20.383+05:30  INFO 31800 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Between]
+2026-11-03T16:42:20.384+05:30  INFO 31800 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Cookie]
+2026-11-03T16:42:20.385+05:30  INFO 31800 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Header]
+2026-11-03T16:42:20.385+05:30  INFO 31800 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Host]
+2026-11-03T16:42:20.385+05:30  INFO 31800 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Method]
+2026-11-03T16:42:20.386+05:30  INFO 31800 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Path]
+2026-11-03T16:42:20.387+05:30  INFO 31800 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Query]
+2026-11-03T16:42:20.387+05:30  INFO 31800 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [ReadBody]
+2026-11-03T16:42:20.387+05:30  INFO 31800 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [RemoteAddr]
+2026-11-03T16:42:20.388+05:30  INFO 31800 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [XForwardedRemoteAddr]
+2026-11-03T16:42:20.388+05:30  INFO 31800 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Weight]
+2026-11-03T16:42:20.388+05:30  INFO 31800 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [CloudFoundryRouteService]
+2026-11-03T16:42:21.239+05:30  INFO 31800 --- [ccar-api-gateway] [main] o.s.b.web.embedded.netty.NettyWebServer  : Netty started on port 8089 (http)
+2026-11-03T16:42:21.393+05:30  INFO 31800 --- [ccar-api-gateway] [main] c.c.c.CcarApiGatewayApplication          : Started CcarApiGatewayApplication in 6.258 seconds (process running for 7.442)
+2026-11-03T16:42:21.599+05:30  INFO 31800 --- [ccar-api-gateway] [reactor-http-nio-2] c.c.c.logging.RequestLoggingFilter       : [3a5af97f-5f2c-4b02-affd-28f32b2c7d3c] -> GET /ccar/forecast/bu-hierarchy
+2026-11-03T16:42:22.070+05:30  INFO 31800 --- [ccar-api-gateway] [reactor-http-nio-2] c.c.c.logging.RequestLoggingFilter       : [3a5af97f-5f2c-4b02-affd-28f32b2c7d3c] <- GET /ccar/forecast/bu-hierarchy route=ccar status=200 OK 471 ms
+2026-11-03T16:42:22.497+05:30  INFO 31800 --- [ccar-api-gateway] [reactor-http-nio-3] c.c.c.logging.RequestLoggingFilter       : [419714d2-fcb2-4604-915d-41c519dbc0dd] -> GET /ccar/forecast/bu-hierarchy
+2026-11-03T16:42:22.567+05:30  INFO 31800 --- [ccar-api-gateway] [reactor-http-nio-3] c.c.c.logging.RequestLoggingFilter       : [419714d2-fcb2-4604-915d-41c519dbc0dd] <- GET /ccar/forecast/bu-hierarchy route=ccar status=200 OK 69 ms
+2026-11-03T16:43:14.144+05:30  INFO 17096 --- [ccar-api-gateway] [main] c.c.c.CcarApiGatewayApplication          : Starting CcarApiGatewayApplication v0.0.1-SNAPSHOT using Java 21.0.2 with PID 17096 (D:\SMBC-CCAR-POC\CCAR-Forecasting-POC\Backend\ccar-api-gateway\target\ccar-api-gateway-0.0.1-SNAPSHOT.jar started by nitin.bharti in D:\SMBC-CCAR-POC\CCAR-Forecasting-POC\Backend\ccar-api-gateway)
+2026-11-03T16:43:14.145+05:30  INFO 17096 --- [ccar-api-gateway] [main] c.c.c.CcarApiGatewayApplication          : No active profile set, falling back to 1 default profile: "default"
+2026-11-03T16:43:15.151+05:30  INFO 17096 --- [ccar-api-gateway] [main] o.s.cloud.context.scope.GenericScope     : BeanFactory id=b8bbf2f9-1b2f-338a-b465-d7983637637f
+2026-11-03T16:43:16.034+05:30  INFO 17096 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [After]
+2026-11-03T16:43:16.035+05:30  INFO 17096 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Before]
+2026-11-03T16:43:16.035+05:30  INFO 17096 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Between]
+2026-11-03T16:43:16.036+05:30  INFO 17096 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Cookie]
+2026-11-03T16:43:16.036+05:30  INFO 17096 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Header]
+2026-11-03T16:43:16.036+05:30  INFO 17096 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Host]
+2026-11-03T16:43:16.036+05:30  INFO 17096 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Method]
+2026-11-03T16:43:16.036+05:30  INFO 17096 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Path]
+2026-11-03T16:43:16.036+05:30  INFO 17096 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Query]
+2026-11-03T16:43:16.036+05:30  INFO 17096 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [ReadBody]
+2026-11-03T16:43:16.036+05:30  INFO 17096 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [RemoteAddr]
+2026-11-03T16:43:16.036+05:30  INFO 17096 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [XForwardedRemoteAddr]
+2026-11-03T16:43:16.036+05:30  INFO 17096 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Weight]
+2026-11-03T16:43:16.037+05:30  INFO 17096 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [CloudFoundryRouteService]
+2026-11-03T16:43:16.646+05:30  INFO 17096 --- [ccar-api-gateway] [main] o.s.b.web.embedded.netty.NettyWebServer  : Netty started on port 8089 (http)
+2026-11-03T16:43:16.757+05:30  INFO 17096 --- [ccar-api-gateway] [main] c.c.c.CcarApiGatewayApplication          : Started CcarApiGatewayApplication in 3.399 seconds (process running for 4.183)
+2026-11-03T16:43:16.937+05:30  INFO 17096 --- [ccar-api-gateway] [reactor-http-nio-2] c.c.c.logging.RequestLoggingFilter       : [e7c2a6d3-aa1c-4079-9fa1-5c27b47acc9e] -> GET /ccar/forecast/bu-hierarchy
+2026-11-03T16:43:17.149+05:30  INFO 17096 --- [ccar-api-gateway] [reactor-http-nio-2] c.c.c.logging.RequestLoggingFilter       : [e7c2a6d3-aa1c-4079-9fa1-5c27b47acc9e] <- GET /ccar/forecast/bu-hierarchy route=ccar status=200 OK 211 ms
+2026-11-03T16:43:17.408+05:30  INFO 17096 --- [ccar-api-gateway] [reactor-http-nio-3] c.c.c.logging.RequestLoggingFilter       : [01663b13-851b-40f4-ab84-46071eb49aa6] -> GET /ccar/forecast/bu-hierarchy
+2026-11-03T16:43:17.476+05:30  INFO 17096 --- [ccar-api-gateway] [reactor-http-nio-3] c.c.c.logging.RequestLoggingFilter       : [01663b13-851b-40f4-ab84-46071eb49aa6] <- GET /ccar/forecast/bu-hierarchy route=ccar status=200 OK 67 ms
+2026-11-03T16:43:22.573+05:30  INFO 17096 --- [ccar-api-gateway] [reactor-http-nio-4] c.c.c.logging.RequestLoggingFilter       : [38b10f85-886b-4e34-96cc-70f2ca92ba53] -> GET /ccar/forecast/bu-hierarchy
+2026-11-03T16:43:22.582+05:30 ERROR 17096 --- [ccar-api-gateway] [reactor-http-nio-4] c.c.c.logging.RequestLoggingFilter       : [38b10f85-886b-4e34-96cc-70f2ca92ba53] x GET /ccar/forecast/bu-hierarchy failed: io.netty.channel.AbstractChannel$AnnotatedConnectException: Connection refused: getsockopt: localhost/127.0.0.1:8081
+2026-11-03T16:43:22.597+05:30 ERROR 17096 --- [ccar-api-gateway] [reactor-http-nio-4] a.w.r.e.AbstractErrorWebExceptionHandler : [aafb51be-3]  500 Server Error for HTTP GET "/ccar/forecast/bu-hierarchy"
+
+io.netty.channel.AbstractChannel$AnnotatedConnectException: Connection refused: getsockopt: localhost/127.0.0.1:8081
+	Suppressed: reactor.core.publisher.FluxOnAssembly$OnAssemblyException: 
+Error has been observed at the following site(s):
+	*__checkpoint ⇢ org.springframework.cloud.gateway.filter.WeightCalculatorWebFilter [DefaultWebFilterChain]
+	*__checkpoint ⇢ HTTP GET "/ccar/forecast/bu-hierarchy" [ExceptionHandlingWebHandler]
+Original Stack Trace:
+Caused by: java.net.ConnectException: Connection refused: getsockopt
+	at java.base/sun.nio.ch.Net.pollConnect(Native Method) ~[na:na]
+	at java.base/sun.nio.ch.Net.pollConnectNow(Net.java:682) ~[na:na]
+	at java.base/sun.nio.ch.SocketChannelImpl.finishConnect(SocketChannelImpl.java:973) ~[na:na]
+	at io.netty.channel.socket.nio.NioSocketChannel.doFinishConnect(NioSocketChannel.java:336) ~[netty-transport-4.1.119.Final.jar!/:4.1.119.Final]
+	at io.netty.channel.nio.AbstractNioChannel$AbstractNioUnsafe.finishConnect(AbstractNioChannel.java:339) ~[netty-transport-4.1.119.Final.jar!/:4.1.119.Final]
+	at io.netty.channel.nio.NioEventLoop.processSelectedKey(NioEventLoop.java:784) ~[netty-transport-4.1.119.Final.jar!/:4.1.119.Final]
+	at io.netty.channel.nio.NioEventLoop.processSelectedKeysOptimized(NioEventLoop.java:732) ~[netty-transport-4.1.119.Final.jar!/:4.1.119.Final]
+	at io.netty.channel.nio.NioEventLoop.processSelectedKeys(NioEventLoop.java:658) ~[netty-transport-4.1.119.Final.jar!/:4.1.119.Final]
+	at io.netty.channel.nio.NioEventLoop.run(NioEventLoop.java:562) ~[netty-transport-4.1.119.Final.jar!/:4.1.119.Final]
+	at io.netty.util.concurrent.SingleThreadEventExecutor$4.run(SingleThreadEventExecutor.java:998) ~[netty-common-4.1.119.Final.jar!/:4.1.119.Final]
+	at io.netty.util.internal.ThreadExecutorMap$2.run(ThreadExecutorMap.java:74) ~[netty-common-4.1.119.Final.jar!/:4.1.119.Final]
+	at io.netty.util.concurrent.FastThreadLocalRunnable.run(FastThreadLocalRunnable.java:30) ~[netty-common-4.1.119.Final.jar!/:4.1.119.Final]
+	at java.base/java.lang.Thread.run(Thread.java:1583) ~[na:na]
+
+2026-11-03T16:43:22.667+05:30  INFO 17096 --- [ccar-api-gateway] [reactor-http-nio-4] c.c.c.logging.RequestLoggingFilter       : [38b10f85-886b-4e34-96cc-70f2ca92ba53] <- GET /ccar/forecast/bu-hierarchy route=ccar status=500 INTERNAL_SERVER_ERROR 93 ms
+2026-11-03T17:02:28.197+05:30  INFO 10232 --- [ccar-api-gateway] [main] c.c.c.CcarApiGatewayApplicationTests     : Starting CcarApiGatewayApplicationTests using Java 21.0.2 with PID 10232 (started by nitin.bharti in D:\SMBC-CCAR-POC\CCAR-Forecasting-POC\Backend\ccar-api-gateway)
+2026-11-03T17:02:28.203+05:30  INFO 10232 --- [ccar-api-gateway] [main] c.c.c.CcarApiGatewayApplicationTests     : No active profile set, falling back to 1 default profile: "default"
+2026-11-03T17:02:30.403+05:30  INFO 10232 --- [ccar-api-gateway] [main] o.s.cloud.context.scope.GenericScope     : BeanFactory id=0bfa22b3-0231-38b2-91b9-28cb37bcd007
+2026-11-03T17:02:31.627+05:30  INFO 10232 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [After]
+2026-11-03T17:02:31.628+05:30  INFO 10232 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Before]
+2026-11-03T17:02:31.628+05:30  INFO 10232 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Between]
+2026-11-03T17:02:31.629+05:30  INFO 10232 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Cookie]
+2026-11-03T17:02:31.629+05:30  INFO 10232 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Header]
+2026-11-03T17:02:31.629+05:30  INFO 10232 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Host]
+2026-11-03T17:02:31.630+05:30  INFO 10232 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Method]
+2026-11-03T17:02:31.632+05:30  INFO 10232 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Path]
+2026-11-03T17:02:31.633+05:30  INFO 10232 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Query]
+2026-11-03T17:02:31.633+05:30  INFO 10232 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [ReadBody]
+2026-11-03T17:02:31.633+05:30  INFO 10232 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [RemoteAddr]
+2026-11-03T17:02:31.633+05:30  INFO 10232 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [XForwardedRemoteAddr]
+2026-11-03T17:02:31.634+05:30  INFO 10232 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Weight]
+2026-11-03T17:02:31.634+05:30  INFO 10232 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [CloudFoundryRouteService]
+2026-11-03T17:02:32.708+05:30  INFO 10232 --- [ccar-api-gateway] [main] c.c.c.CcarApiGatewayApplicationTests     : Started CcarApiGatewayApplicationTests in 5.032 seconds (process running for 6.849)
+2026-11-03T17:12:33.570+05:30  INFO 26508 --- [ccar-api-gateway] [main] c.c.c.CcarApiGatewayApplicationTests     : Starting CcarApiGatewayApplicationTests using Java 21.0.2 with PID 26508 (started by nitin.bharti in D:\SMBC-CCAR-POC\CCAR-Forecasting-POC\Backend\ccar-poc-root\ccar-api-gateway)
+2026-11-03T17:12:33.572+05:30  INFO 26508 --- [ccar-api-gateway] [main] c.c.c.CcarApiGatewayApplicationTests     : No active profile set, falling back to 1 default profile: "default"
+2026-11-03T17:12:34.348+05:30  INFO 26508 --- [ccar-api-gateway] [main] o.s.cloud.context.scope.GenericScope     : BeanFactory id=0bfa22b3-0231-38b2-91b9-28cb37bcd007
+2026-11-03T17:12:35.337+05:30  INFO 26508 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [After]
+2026-11-03T17:12:35.338+05:30  INFO 26508 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Before]
+2026-11-03T17:12:35.338+05:30  INFO 26508 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Between]
+2026-11-03T17:12:35.338+05:30  INFO 26508 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Cookie]
+2026-11-03T17:12:35.338+05:30  INFO 26508 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Header]
+2026-11-03T17:12:35.339+05:30  INFO 26508 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Host]
+2026-11-03T17:12:35.339+05:30  INFO 26508 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Method]
+2026-11-03T17:12:35.339+05:30  INFO 26508 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Path]
+2026-11-03T17:12:35.339+05:30  INFO 26508 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Query]
+2026-11-03T17:12:35.341+05:30  INFO 26508 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [ReadBody]
+2026-11-03T17:12:35.341+05:30  INFO 26508 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [RemoteAddr]
+2026-11-03T17:12:35.341+05:30  INFO 26508 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [XForwardedRemoteAddr]
+2026-11-03T17:12:35.341+05:30  INFO 26508 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [Weight]
+2026-11-03T17:12:35.341+05:30  INFO 26508 --- [ccar-api-gateway] [main] o.s.c.g.r.RouteDefinitionRouteLocator    : Loaded RoutePredicateFactory [CloudFoundryRouteService]
+2026-11-03T17:12:35.734+05:30  INFO 26508 --- [ccar-api-gateway] [main] c.c.c.CcarApiGatewayApplicationTests     : Started CcarApiGatewayApplicationTests in 2.534 seconds (process running for 3.727)
