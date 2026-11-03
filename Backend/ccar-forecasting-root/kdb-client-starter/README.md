@@ -8,7 +8,7 @@ The starter abstracts KDB connection management and enables developers to focus 
 
 **Overview**
 
-. KDB Starter provides:
+ KDB Starter provides:
 
 . KDB+ IPC connection management
  
@@ -26,14 +26,14 @@ The starter abstracts KDB connection management and enables developers to focus 
 
 **Features**
 
-✅ KDB+ IPC Connectivity
-✅ Connection Pooling
-✅ Spring Boot Auto Configuration
-✅ Centralized Query Execution
-✅ Health Check Endpoint
-✅ Connection Pool Metrics Endpoint
-✅ Custom Exception Handling
-✅ Lightweight and POC-Friendly Design
+    ✅ KDB+ IPC Connectivity
+    ✅ Connection Pooling
+    ✅ Spring Boot Auto Configuration
+    ✅ Centralized Query Execution
+    ✅ Health Check Endpoint
+    ✅ Connection Pool Metrics Endpoint
+    ✅ Custom Exception Handling
+    ✅ Lightweight and POC-Friendly Design
 
 **Architecture**
 
@@ -59,30 +59,30 @@ The starter abstracts KDB connection management and enables developers to focus 
 Before using KDB Starter, ensure the following software is available.
 
 **Required Software**
-Java 17+
-Maven 3.8+
-Spring Boot 4.x
-KDB+ Server
+
+    Java 17+
+    Maven 3.8+
+    Spring Boot 4.x
+    KDB+ Server
 
 **KDB Java API**
 
-The KDB Java API (c.jar) is required. (https://github.com/KxSystems/kdb/tree/master/c)
+The KDB Java API (javakdb-2.2.jar) is required.
 Install it into your local Maven repository:
 
-mvn install:install-file \
--Dfile=/path/to/c.jar \
--DgroupId=com.kx \
--DartifactId=kdb \
--Dversion=4.0 \
--Dpackaging=jar
+       <dependency>
+            <groupId>com.kx</groupId>
+            <artifactId>javakdb</artifactId>
+            <version>2.2</version>
+        </dependency>
 
 **Verify installation:**
 
-~/.m2/repository/com/kx/kdb/4.0/
+~/.m2/repository/com/kx/javakdb/2.2/
 
 **Expected:**
-kdb-4.0.jar
-kdb-4.0.pom
+
+ javakdb-2.2.jar
 
 **Project Structure**
 
@@ -103,10 +103,10 @@ kdb-4.0.pom
         │   └── KdbTemplate
         │
         └── exception
-        ├── KdbException
-        ├── KdbConnectionException
-        ├── KdbPoolExhaustedException
-        └── KdbQueryException
+            ├── KdbException
+            ├── KdbConnectionException
+            ├── KdbPoolExhaustedException
+            └── KdbQueryException
 
 **Installation**
 
@@ -119,11 +119,11 @@ This installs the starter into your local Maven repository.
 
 **Step 2: Add Dependency**
 
-<dependency>
-    <groupId>com.iris.kdb</groupId>
-    <artifactId>kdb-starter</artifactId>
-    <version>1.0.0</version>
-</dependency>
+    <dependency>
+        <groupId>com.iris.kdb</groupId>
+        <artifactId>kdb-starter</artifactId>
+        <version>1.0.0</version>
+    </dependency>
 
 **Step 3: Configure Application Properties**
 
@@ -149,45 +149,45 @@ This installs the starter into your local Maven repository.
 
 **Inject KdbTemplate**
 
-@Service
-@RequiredArgsConstructor
-public class TradeService {
-
-    private final KdbTemplate kdbTemplate;
-
-    public Long getTradeCount() {
-
-        return kdbTemplate.execute(
-                "count trades",
-                Long.class);
-    }
-
-    public Object getTrades() {
-
-        return kdbTemplate.execute(
-                "select from trades");
-    }
-}
+        @Service
+        @RequiredArgsConstructor
+        public class TradeService {
+        
+            private final KdbTemplate kdbTemplate;
+        
+            public Long getTradeCount() {
+        
+                return kdbTemplate.execute(
+                        "count trades",
+                        Long.class);
+            }
+        
+            public Object getTrades() {
+        
+                return kdbTemplate.execute(
+                        "select from trades");
+            }
+        }
 
 **Expose REST API**
 
-@RestController
-@RequiredArgsConstructor
-@RequestMapping("/trades")
-public class TradeController {
-
-    private final TradeService tradeService;
-
-    @GetMapping("/count")
-    public Long getTradeCount() {
-        return tradeService.getTradeCount();
+    @RestController
+    @RequiredArgsConstructor
+    @RequestMapping("/trades")
+    public class TradeController {
+    
+        private final TradeService tradeService;
+    
+        @GetMapping("/count")
+        public Long getTradeCount() {
+            return tradeService.getTradeCount();
+        }
+    
+        @GetMapping
+        public Object getTrades() {
+            return tradeService.getTrades();
+        }
     }
-
-    @GetMapping
-    public Object getTrades() {
-        return tradeService.getTrades();
-    }
-}
 
 **Auto Configuration**
 
@@ -207,9 +207,9 @@ q -p 5000
 
 **Create sample table:**
 
-trades:([] id:1001 1002 1003 1004 1005;
-sym:`AAPL`MSFT`GOOG`TSLA`AMZN;
-qty:100 250 150 75 300)
+    trades:([] id:1001 1002 1003 1004 1005;
+    sym:`AAPL`MSFT`GOOG`TSLA`AMZN;
+    qty:100 250 150 75 300)
 
 Verify:
 
@@ -219,33 +219,33 @@ select from trades
 
 Check KDB connectivity:
 
-GET /kdb/health
+  GET /kdb/health
 
 Example Response:
 
     {
-    "connected": true,
-    "activeConnections": 0,
-    "idleConnections": 1,
-    "waitingThreads": 0,
-    "maxPoolSize": 10
+        "connected": true,
+        "activeConnections": 0,
+        "idleConnections": 1,
+        "waitingThreads": 0,
+        "maxPoolSize": 10
     }
 
 **Metrics Endpoint**
 
 View pool statistics:
 
-GET /kdb/metrics
+  GET /kdb/metrics
 
 Example Response:
 
     {
-    "host": "localhost",
-    "port": 5000,
-    "activeConnections": 2,
-    "idleConnections": 8,
-    "waitingThreads": 0,
-    "maxPoolSize": 10
+        "host": "localhost",
+        "port": 5000,
+        "activeConnections": 2,
+        "idleConnections": 8,
+        "waitingThreads": 0,
+        "maxPoolSize": 10
     }
 
 **Exception Handling**
@@ -292,12 +292,11 @@ kdb-starter-1.0.0.pom
 
 Verify:
 
-~/.m2/repository/com/kx/kdb/4.0/
+~/.m2/repository/com/kx/javakdb/2.2/
 
 contains:
 
-kdb-4.0.jar
-kdb-4.0.pom
+ javakdb-2.2.jar
 
 **Benefits**
 
