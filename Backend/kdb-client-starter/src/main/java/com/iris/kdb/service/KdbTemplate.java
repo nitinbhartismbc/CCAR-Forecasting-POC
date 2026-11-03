@@ -5,7 +5,7 @@ import com.iris.kdb.exception.KdbPoolExhaustedException;
 import com.iris.kdb.exception.KdbQueryException;
 import com.iris.kdb.pool.KdbConnectionPool;
 
-import kx.c;
+import com.kx.c;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

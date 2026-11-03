@@ -1,7 +1,7 @@
 package com.iris.kdb.metrics;
 
 import com.iris.kdb.pool.KdbConnectionPool;
-import kx.c;
+import com.kx.c;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.pool2.impl.GenericObjectPool;
 import org.springframework.scheduling.annotation.Scheduled;

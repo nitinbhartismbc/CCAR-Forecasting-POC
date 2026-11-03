@@ -3,9 +3,7 @@ package com.forecast.ccar.client;
 
 import java.io.IOException;
 import java.util.Arrays;
-
-import com.forecast.ccar.kx.c;
-
+import com.kx.c;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.lang.reflect.Array;
 import java.util.*;

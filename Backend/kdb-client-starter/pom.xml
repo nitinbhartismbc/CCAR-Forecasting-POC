@@ -61,8 +61,8 @@
         <!-- KDB c.jar -->
         <dependency>
             <groupId>com.kx</groupId>
-            <artifactId>kdb</artifactId>
-            <version>4.0</version>
+            <artifactId>javakdb</artifactId>
+            <version>2.2</version>
         </dependency>
 
     </dependencies>

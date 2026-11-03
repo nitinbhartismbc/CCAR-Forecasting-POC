@@ -1,9 +1,9 @@
 package com.iris.kdb.pool;
 
 import com.iris.kdb.config.KdbProperties;
-
+import com.kx.c;
 import com.iris.kdb.metrics.KdbPoolStats;
-import kx.c;
+
 
 import org.apache.commons.pool2.impl.GenericObjectPool;
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
