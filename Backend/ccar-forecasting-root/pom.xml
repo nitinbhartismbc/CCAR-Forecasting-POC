@@ -40,6 +40,8 @@
         <!-- Aggregated only: still inherits spring-boot-starter-parent 3.4.5 because
              Spring Cloud 2024.0.x (Gateway) does not support Spring Boot 4.x -->
         <module>ccar-api-gateway</module>
+        <module>ccar-auth-service</module>
+
     </modules>
 
     <dependencyManagement>
