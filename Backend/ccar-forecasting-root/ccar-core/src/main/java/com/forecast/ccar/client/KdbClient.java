@@ -16,9 +16,17 @@ public class KdbClient {
         try {
             // host, port, optional "user:password"
             //conn = new c("localhost", 5001);
-            conn = new c("192.168.11.200", 5001, "test:test@123");
+            conn = new c("192.168.11.200", 5173, "test:test@123");
 
             // Run a q query
+            // Create the table on the KDB server (only if it does not already exist)
+            String createTable =
+                    "if[not `forecast_ccar in tables[];"
+                  + " `forecast_ccar set flip (`OP_CODE_ID`ACCOUNT_ID`CCY_CODE`PORTFOLIO_ID`T0_DATE, `T0, `$\"T_\",/:string 1+til 36) !"
+                  + " (10000001 10000001 10000001; 210001 400001 500001; `CHF`CHF`CHF; `PORT_0001`PORT_0001`PORT_0001; 3#2025.12.31),"
+                  + " flip 100000 1000 10000 +\\: til 37]";
+            conn.k(createTable);
+
             c.Flip result = (c.Flip) conn.k("select from forecast_ccar");
 
             // Column names
@@ -46,6 +54,7 @@ public class KdbClient {
             Map<String, Object> response = new LinkedHashMap<>();
             response.put("forecast_ccar", Collections.singletonMap("data", rows));
 
+
             String json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(response);
             System.out.println(json);
             }
@@ -55,7 +64,8 @@ public class KdbClient {
             e.printStackTrace();
         } finally {
             if (conn != null) {
-                try { conn.close(); } catch (Exception ignored) {}
+                try {
+                    conn.close(); } catch (Exception ignored) {}
             }
         }
     }
