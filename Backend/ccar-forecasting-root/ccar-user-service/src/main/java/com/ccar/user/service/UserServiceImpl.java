@@ -1,15 +1,20 @@
 package com.ccar.user.service;
 
+import com.ccar.user.dto.LoginRequest;
+import com.ccar.user.dto.LoginResponse;
 import com.ccar.user.dto.UserRequest;
 import com.ccar.user.dto.UserResponse;
 import com.ccar.user.entity.User;
 import com.ccar.user.entity.UserProfile;
 import com.ccar.user.exception.DuplicateEmailException;
+import com.ccar.user.exception.InvalidCredentialsException;
 import com.ccar.user.exception.UserNotFoundException;
 import com.ccar.user.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import com.ccar.user.security.JwtTokenProvider;
+import org.springframework.security.crypto.password.PasswordEncoder;
 
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -28,10 +33,18 @@ public class UserServiceImpl implements UserService {
     private static final Logger LOGGER = LoggerFactory.getLogger(UserServiceImpl.class);
 
     private final UserRepository userRepository;
-    //private final JwtTokenProvider jwtTokenProvider;
+    private final JwtTokenProvider jwtTokenProvider;
+    private final PasswordEncoder passwordEncoder;
 
-    public UserServiceImpl(UserRepository userRepository) {
+
+    public UserServiceImpl(
+            UserRepository userRepository,
+            JwtTokenProvider jwtTokenProvider,
+            PasswordEncoder passwordEncoder) {
+
         this.userRepository = userRepository;
+        this.jwtTokenProvider = jwtTokenProvider;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @Override
@@ -97,21 +110,52 @@ public class UserServiceImpl implements UserService {
         LOGGER.info("Deleted user with id {}", id);
     }
 
-   /* @Override
+    @Override
     public LoginResponse login(LoginRequest request) {
-        User user = userRepository.findByEmail(request.getEmail())
-                .orElseThrow(InvalidCredentialsException::new);
+        LOGGER.info("Login attempt for email: {}", request.getEmail());
 
-        String submittedHash = hashPassword(request.getPassword());
-        if (!constantTimeEquals(submittedHash, user.getPasswordHash())) {
+        User user = userRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> {
+                    LOGGER.warn("Login failed: Invalid credentials");
+                    return new InvalidCredentialsException();
+                });
+
+        if (!passwordEncoder.matches(
+                request.getPassword(),
+                user.getPasswordHash())) {
+
+            LOGGER.warn("Login failed: Invalid credentials");
             throw new InvalidCredentialsException();
         }
 
-      //  String token = jwtTokenProvider.generateToken(user.getId(), user.getEmail());
-        LOGGER.info("User " + user.getId() + " logged in");
-        return new LoginResponse(token, jwtTokenProvider.getExpirationSeconds(), user.getId());
+        LOGGER.debug("Credentials verified for userId: {}", user.getId());
+
+        String token = jwtTokenProvider.generateToken(user.getEmail());
+
+        LOGGER.info("Login successful for userId: {}", user.getId());
+
+        return new LoginResponse(
+                token,
+                jwtTokenProvider.getExpirationSeconds(),
+                user.getId()
+        );
     }
-*/
+
+    /* @Override
+     public LoginResponse login(LoginRequest request) {
+         User user = userRepository.findByEmail(request.getEmail())
+                 .orElseThrow(InvalidCredentialsException::new);
+
+         String submittedHash = hashPassword(request.getPassword());
+         if (!constantTimeEquals(submittedHash, user.getPasswordHash())) {
+             throw new InvalidCredentialsException();
+         }
+
+       //  String token = jwtTokenProvider.generateToken(user.getId(), user.getEmail());
+         LOGGER.info("User " + user.getId() + " logged in");
+         return new LoginResponse(token, jwtTokenProvider.getExpirationSeconds(), user.getId());
+     }
+ */
     private User findUserOrThrow(Long id) {
         return userRepository.findById(id).orElseThrow(() -> new UserNotFoundException(id));
     }
@@ -128,13 +172,14 @@ public class UserServiceImpl implements UserService {
      * method" exercise.
      */
     private String hashPassword(String rawPassword) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hashed = digest.digest(rawPassword.getBytes());
-            return HexFormat.of().formatHex(hashed);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 algorithm not available", e);
-        }
+//        try {
+//            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+//            byte[] hashed = digest.digest(rawPassword.getBytes());
+//            return HexFormat.of().formatHex(hashed);
+//        } catch (NoSuchAlgorithmException e) {
+//            throw new IllegalStateException("SHA-256 algorithm not available", e);
+//        }
+        return passwordEncoder.encode(rawPassword);
     }
 
     /**

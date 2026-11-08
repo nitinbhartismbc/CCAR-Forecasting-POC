@@ -1,5 +1,7 @@
 package com.ccar.user.service;
 
+import com.ccar.user.dto.LoginRequest;
+import com.ccar.user.dto.LoginResponse;
 import com.ccar.user.dto.UserRequest;
 import com.ccar.user.dto.UserResponse;
 
@@ -17,5 +19,5 @@ public interface UserService {
 
     void deleteUser(Long id);
 
-   // LoginResponse login(LoginRequest request);
+    LoginResponse login(LoginRequest request);
 }
