@@ -1,9 +1,13 @@
 package com.ccar.user.controller;
 
+import com.ccar.user.dto.LoginRequest;
+import com.ccar.user.dto.LoginResponse;
 import com.ccar.user.dto.UserRequest;
 import com.ccar.user.dto.UserResponse;
 import com.ccar.user.service.UserService;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -15,6 +19,8 @@ import java.util.List;
 public class UserController {
 
     private final UserService userService;
+    private static final Logger log =
+            LoggerFactory.getLogger(UserController.class);
 
     public UserController(UserService userService) {
         this.userService = userService;
@@ -56,4 +62,17 @@ public class UserController {
     public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
         return ResponseEntity.ok(userService.login(request));
     }*/
+
+    @PostMapping("/login")
+    public ResponseEntity<LoginResponse> login(
+            @Valid @RequestBody LoginRequest request) {
+
+        log.info("Login API request received");
+
+        LoginResponse response = userService.login(request);
+
+        log.info("Login API completed successfully");
+
+        return ResponseEntity.ok(response);
+    }
 }

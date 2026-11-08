@@ -1,3 +1,4 @@
+
 package com.ccar.user.dto;
 
 public class LoginResponse {
@@ -39,3 +40,4 @@ public class LoginResponse {
         this.userId = userId;
     }
 }
+ 
