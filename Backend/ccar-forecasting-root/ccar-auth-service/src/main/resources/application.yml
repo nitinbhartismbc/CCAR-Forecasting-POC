@@ -1,9 +1,0 @@
-server:
-  port: 8081
-spring:
-  application:
-    name: ccar-auth-service
-jwt:
-  secret: ${JWT_SECRET:change-me-dev-secret-at-least-32-chars-long}
-  expiration-seconds: 90            # testing: 90 sec
-#  refresh-expiration-seconds: 120   # testing: 2 min

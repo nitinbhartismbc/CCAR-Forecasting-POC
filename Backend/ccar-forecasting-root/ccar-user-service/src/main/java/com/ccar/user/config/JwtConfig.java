@@ -9,10 +9,10 @@ import com.ccar.user.security.JwtTokenProvider;
 @Configuration
 public class JwtConfig {
 
-    @Value("${app.jwt.secret}")
+    @Value("${ccar.security.jwt.secret}")
     private String jwtSecret;
 
-    @Value("${app.jwt.expiration-seconds:3600}")
+    @Value("${ccar.security.jwt.expiration-seconds:3600}")
     private long jwtExpirationSeconds;
 
     @Bean
