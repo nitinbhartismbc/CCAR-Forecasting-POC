@@ -22,7 +22,7 @@ public class JwtTokenValidator {
     private final SecretKey secretKey;
 
     public JwtTokenValidator(
-            @Value("${app.jwt.secret}") String secret) {
+            @Value("${ccar.security.jwt.secret}") String secret) {
 
         this.secretKey = Keys.hmacShaKeyFor(
                 Decoders.BASE64.decode(secret)
