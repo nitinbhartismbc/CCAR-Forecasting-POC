@@ -39,7 +39,6 @@
         <module>ccar-core</module>
         <module>ccar-user-service</module>
         <module>ccar-api-gateway</module>
-        <module>ccar-auth-service</module>
     </modules>
 
     <dependencyManagement>

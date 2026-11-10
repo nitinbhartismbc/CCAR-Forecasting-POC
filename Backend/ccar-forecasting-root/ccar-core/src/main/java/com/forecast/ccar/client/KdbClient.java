@@ -20,14 +20,15 @@ public class KdbClient {
 
             // Run a q query
             // Create the table on the KDB server (only if it does not already exist)
-            String createTable =
+
+            /*  String createTable =
                     "if[not `forecast_ccar in tables[];"
                   + " `forecast_ccar set flip (`OP_CODE_ID`ACCOUNT_ID`CCY_CODE`PORTFOLIO_ID`T0_DATE, `T0, `$\"T_\",/:string 1+til 36) !"
                   + " (10000001 10000001 10000001; 210001 400001 500001; `CHF`CHF`CHF; `PORT_0001`PORT_0001`PORT_0001; 3#2025.12.31),"
-                  + " flip 100000 1000 10000 +\\: til 37]";
-            conn.k(createTable);
+                  + " flip 100000 1000 10000 +\\: til 37]";*/
+          //  conn.k(createTable);
 
-            c.Flip result = (c.Flip) conn.k("select from forecast_ccar");
+            c.Flip result = (c.Flip) conn.k("select from BU_HIERARCHY");
 
             // Column names
             String[] cols = result.x;
