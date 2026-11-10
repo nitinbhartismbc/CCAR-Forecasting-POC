@@ -104,7 +104,7 @@ public class BuHierarchyService {
         long start = System.currentTimeMillis();
 
         // 0! unkeys the result in case BU_HIERARCHY is a keyed table, so we always get a c.Flip back
-        Object result = kdbTemplate.execute("select from " + table);
+        Object result = kdbTemplate.execute("0!select from " + table);
         if (!(result instanceof c.Flip flip)) {
             throw new IllegalStateException("Unexpected KDB result for table " + table + ": "
                     + (result == null ? "null" : result.getClass().getName()));
