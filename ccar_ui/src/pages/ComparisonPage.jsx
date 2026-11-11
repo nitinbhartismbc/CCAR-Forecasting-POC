@@ -4,11 +4,11 @@ import {Async, MeasureCards} from "../components/Common.jsx";
 import {fmtDate, fmtMonthKey, measureName, money, scopeParams} from "../utils.js";
 
 export default function ComparisonPage({scope, t0, portfolio}) {
-    const st = useAsync(() => api.comparison({
+    const st = useAsync((signal) => api.comparison({
         ...scopeParams(scope),
         portfolioId: portfolio,
         t0Date: t0
-    }), [scope.kind, scope.id, portfolio, t0]);
+    }, {signal}), [scope.kind, scope.id, portfolio, t0]);
     return (
         <Async state={st} what="the comparison">{(d) => {
             const latest = {};

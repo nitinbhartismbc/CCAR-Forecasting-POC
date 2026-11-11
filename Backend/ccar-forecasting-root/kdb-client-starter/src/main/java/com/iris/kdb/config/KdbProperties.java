@@ -66,6 +66,13 @@ public class KdbProperties {
     private long minEvictableIdleTimeMillis = 60000;
 
     /**
+     * Socket read timeout (SO_TIMEOUT) for the login handshake and every query, in milliseconds.
+     * A query running longer fails with KdbTimeoutException instead of blocking the request thread forever.
+     * 0 disables the timeout (not recommended).
+     */
+    private int queryTimeoutMillis = 30000;
+
+    /**
      * AOP query logging settings (kdb.logging.*)
      */
     private final Logging logging = new Logging();
@@ -206,6 +213,14 @@ public class KdbProperties {
             long timeBetweenEvictionRunsMillis) {
         this.timeBetweenEvictionRunsMillis =
                 timeBetweenEvictionRunsMillis;
+    }
+
+    public int getQueryTimeoutMillis() {
+        return queryTimeoutMillis;
+    }
+
+    public void setQueryTimeoutMillis(int queryTimeoutMillis) {
+        this.queryTimeoutMillis = queryTimeoutMillis;
     }
 
     public long getMinEvictableIdleTimeMillis() {

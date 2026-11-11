@@ -1,82 +1,55 @@
 package com.forecast.ccar.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.iris.kdb.service.KdbTemplate;
+import com.kx.c;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
 import java.lang.reflect.Array;
 import java.util.*;
 
-import com.kx.c;
-
+/**
+ * Reads {@code forecast_ccar} through the pooled {@link KdbTemplate} (kdb-client-starter).
+ * <p>
+ * No try/catch-log-rethrow here: KDB failures surface as the starter's typed {@code KdbException}s and are
+ * mapped to HTTP (503/504/502) and logged once by {@code GlobalExceptionHandler}.
+ */
 @Service
 public class KdbService {
 
     private static final Logger log = LoggerFactory.getLogger(KdbService.class);
 
-    @Value("${kdb.host}")
-    private String host;
+    static final String FORECAST_QUERY = "select from forecast_ccar";
 
-    @Value("${kdb.port}")
-    private int port;
-
-    @Value("${kdb.username}")
-    private String username;
-
-    @Value("${kdb.password}")
-    private String password;
-
+    private final KdbTemplate kdbTemplate;
     private final ObjectMapper mapper = new ObjectMapper();
 
-    /**
-     * Opens a new connection to the KDB process.
-     */
-    private c getConnection() throws IOException, c.KException {
-        log.debug("Opening KDB connection to {}:{} as user '{}'", host, port, username);
-        long start = System.currentTimeMillis();
-        c conn = new c(host, port, username + ":" + password);
-        log.info("Connected to KDB at {}:{} in {} ms", host, port, System.currentTimeMillis() - start);
-        return conn;
+    public KdbService(KdbTemplate kdbTemplate) {
+        this.kdbTemplate = kdbTemplate;
     }
 
     /**
      * Called from the controller. Returns forecast_ccar data as a JSON string.
      */
     public String getForecastCcarJson() {
-        final String query = "select from forecast_ccar";
         log.info("Fetching forecast_ccar data from KDB");
-        long start = System.currentTimeMillis();
 
-        c conn = null;
+        c.Flip result = kdbTemplate.execute(FORECAST_QUERY, c.Flip.class);
+        List<Map<String, Object>> rows = flipToRows(result);
+        log.info("Query returned {} row(s)", rows.size());
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("forecast_ccar", Collections.singletonMap("data", rows));
+
         try {
-            conn = getConnection();
-
-            log.debug("Executing KDB query: {}", query);
-            Object result = conn.k(query);
-            List<Map<String, Object>> rows = flipToRows((c.Flip) result);
-            log.info("Query returned {} row(s)", rows.size());
-
-            Map<String, Object> response = new LinkedHashMap<>();
-            response.put("forecast_ccar", Collections.singletonMap("data", rows));
-
             String json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(response);
             log.debug("JSON response size: {} characters", json.length());
-            log.info("forecast_ccar fetch completed in {} ms", System.currentTimeMillis() - start);
             return json;
-        } catch (c.KException e) {
-            log.error("KDB returned an error for query '{}': {}", query, e.getMessage(), e);
-            throw new RuntimeException("KDB query failed: " + e.getMessage(), e);
-        } catch (IOException e) {
-            log.error("Unable to communicate with KDB at {}:{}: {}", host, port, e.getMessage(), e);
-            throw new RuntimeException("KDB connection error: " + e.getMessage(), e);
-        } catch (Exception e) {
-            log.error("Unexpected error while fetching data from KDB: {}", e.getMessage(), e);
-            throw new RuntimeException("Failed to fetch data from KDB: " + e.getMessage(), e);
-        } finally {
-            closeQuietly(conn);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Could not serialise forecast_ccar result to JSON", e);
         }
     }
 
@@ -109,16 +82,5 @@ public class KdbService {
             rows.add(row);
         }
         return rows;
-    }
-
-    private void closeQuietly(c conn) {
-        if (conn != null) {
-            try {
-                conn.close();
-                log.debug("KDB connection closed");
-            } catch (IOException e) {
-                log.warn("Failed to close KDB connection cleanly: {}", e.getMessage());
-            }
-        }
     }
 }

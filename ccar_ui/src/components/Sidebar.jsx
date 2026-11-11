@@ -1,4 +1,5 @@
 import {useEffect, useMemo, useState} from "react";
+import {messageFor} from "../api/errors.js";
 
 function TreeNode({node, kidsOf, navId, onSelect, expanded, toggle, depth = 0}) {
     const kids = kidsOf[node.id] || [], open = expanded.has(node.id);
@@ -79,8 +80,9 @@ export default function Sidebar({page, setPage, hier, switchHier, nav, scope, on
                 <div className="tree-list">
                     {nav.loading && <div className="tree-hint">Loading hierarchy…</div>}
                     {nav.error &&
-                        <div className="tree-hint error">Couldn’t load the hierarchy. <button className="link-btn"
-                                                                                              onClick={nav.reload}>Retry</button>
+                        <div className="tree-hint error" role="alert">Couldn’t load the hierarchy. {messageFor(nav.error)}
+                            {nav.error.correlationId && <small> Ref: {nav.error.correlationId}</small>}{" "}
+                            <button className="link-btn" onClick={nav.reload}>Retry</button>
                         </div>}
                     {!term && roots.map((r) => <TreeNode key={r.id} node={r} kidsOf={kidsOf} navId={scope?.navId}
                                                          onSelect={select} expanded={expanded} toggle={toggle}/>)}

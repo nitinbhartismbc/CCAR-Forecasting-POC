@@ -1,6 +1,7 @@
 package com.iris.kdb.pool;
 
 import com.iris.kdb.config.KdbProperties;
+import com.iris.kdb.exception.KdbConnectionException;
 import com.kx.c;
 
 import org.apache.commons.pool2.BasePooledObjectFactory;
@@ -8,6 +9,8 @@ import org.apache.commons.pool2.PooledObject;
 import org.apache.commons.pool2.impl.DefaultPooledObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
 
 public class KdbConnectionFactory
         extends BasePooledObjectFactory<c> {
@@ -22,33 +25,47 @@ public class KdbConnectionFactory
         this.properties = properties;
     }
 
+    /**
+     * Opens a connection with SO_TIMEOUT = {@code kdb.query-timeout-millis}, so neither the login handshake nor
+     * a query can block a thread forever. Failures surface as {@link KdbConnectionException} (never the raw
+     * IOException / KException, and never the password).
+     */
     @Override
-    public c create() throws Exception {
+    public c create() {
 
-        log.info(
-                "Creating KDB connection {}:{}",
-                properties.getHost(),
-                properties.getPort());
+        String target = properties.getHost() + ":" + properties.getPort();
+
+        log.info("Creating KDB connection {}", target);
 
         /*
          * Username/password format:
          * "user:password"
          */
-
         String credentials =
                 properties.getUsername()
                         + ":"
                         + properties.getPassword();
 
-        c connection = new c(
-                properties.getHost(),
-                properties.getPort(),
-                credentials);
+        try {
+            c connection = new c(
+                    properties.getHost(),
+                    properties.getPort(),
+                    credentials,
+                    false,
+                    properties.getQueryTimeoutMillis());
 
-        log.info(
-                "KDB connection established");
+            log.info("KDB connection established to {}", target);
+            return connection;
 
-        return connection;
+        } catch (c.KException ex) {
+            // the only KException the constructor throws is "access" (login refused)
+            throw new KdbConnectionException(
+                    "KDB login refused at " + target + " for user '" + properties.getUsername() + "'", ex);
+
+        } catch (IOException ex) {
+            throw new KdbConnectionException(
+                    "Cannot connect to KDB at " + target + ": " + ex.getMessage(), ex);
+        }
     }
 
     @Override
@@ -76,9 +93,9 @@ public class KdbConnectionFactory
 
             } catch (Exception ex) {
 
-                log.error(
-                        "Error closing KDB connection",
-                        ex);
+                log.warn(
+                        "Error closing KDB connection: {}",
+                        ex.toString());
             }
         }
 
@@ -101,8 +118,8 @@ public class KdbConnectionFactory
         } catch (Exception ex) {
 
             log.warn(
-                    "KDB connection validation failed",
-                    ex);
+                    "KDB connection validation failed: {}",
+                    ex.toString());
 
             return false;
         }

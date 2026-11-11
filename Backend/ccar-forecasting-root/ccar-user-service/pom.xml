@@ -44,6 +44,19 @@
             <artifactId>spring-security-crypto</artifactId>
         </dependency>
 
+        <!-- Shared error catalogue, problem format and correlation-id filter -->
+        <dependency>
+            <groupId>com.ccar</groupId>
+            <artifactId>ccar-common</artifactId>
+        </dependency>
+
+        <!-- @WebMvcTest slice (Spring Boot 4 split the MVC test support into its own starter) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
         <!-- JWT API -->
         <dependency>
             <groupId>io.jsonwebtoken</groupId>

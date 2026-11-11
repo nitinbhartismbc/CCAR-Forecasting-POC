@@ -1,6 +1,7 @@
 package com.ccar.ccar_api_gateway.security;
 
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
@@ -19,6 +20,9 @@ public class JwtTokenValidator {
     private static final Logger log =
             LoggerFactory.getLogger(JwtTokenValidator.class);
 
+    /** Outcome of a token check; lets the gateway tell the client "expired" (re-login) from "invalid". */
+    public enum TokenStatus { VALID, EXPIRED, INVALID }
+
     private final SecretKey secretKey;
 
     public JwtTokenValidator(
@@ -31,7 +35,7 @@ public class JwtTokenValidator {
         log.info("JWT Token Validator initialized successfully");
     }
 
-    public boolean isValid(String token) {
+    public TokenStatus validate(String token) {
 
         try {
             Claims claims = Jwts.parser()
@@ -45,16 +49,24 @@ public class JwtTokenValidator {
                     claims.getSubject()
             );
 
-            return true;
+            return TokenStatus.VALID;
+
+        } catch (ExpiredJwtException e) {
+
+            return TokenStatus.EXPIRED;
 
         } catch (JwtException | IllegalArgumentException e) {
 
-            log.warn(
+            log.debug(
                     "JWT validation failed: {}",
                     e.getClass().getSimpleName()
             );
 
-            return false;
+            return TokenStatus.INVALID;
         }
+    }
+
+    public boolean isValid(String token) {
+        return validate(token) == TokenStatus.VALID;
     }
 }

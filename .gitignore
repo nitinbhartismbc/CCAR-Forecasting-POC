@@ -1,0 +1,79 @@
+###############################################################################
+# CCAR Forecasting POC - repository-wide ignores (Backend + ccar_ui)
+# Module-level .gitignore files under Backend/ still apply in addition to this.
+###############################################################################
+
+### Maven / Java build output ###
+target/
+!**/src/main/**/target/
+!**/src/test/**/target/
+*.class
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+.mvn/wrapper/maven-wrapper.jar
+HELP.md
+
+### Application logs (incl. rolled/compressed logback files, e.g. ccar.log.2026-11-03.0.gz) ###
+logs/
+*.log
+*.log.*
+*.gz
+
+### Test / coverage reports ###
+surefire-reports/
+failsafe-reports/
+.jacoco/
+jacoco.exec
+
+### Node / Vite (ccar_ui) ###
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+.env.local
+.env.*.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+### IntelliJ IDEA ###
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+### Eclipse / STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache
+
+### NetBeans ###
+nbproject/private/
+nbbuild/
+nbdist/
+.nb-gradle/
+
+### VS Code ###
+.vscode/
+
+### OS files ###
+.DS_Store
+Thumbs.db
+desktop.ini
+
+### Temporary / editor files ###
+*.tmp
+*.temp
+*.swp
+*.swo
+*~

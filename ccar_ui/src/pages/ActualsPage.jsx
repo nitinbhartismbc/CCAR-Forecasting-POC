@@ -4,11 +4,11 @@ import {AggregateGrid, Async, MeasureCards} from "../components/Common.jsx";
 import {fmtDate, scopeParams} from "../utils.js";
 
 export default function ActualsPage({scope, t0, portfolio}) {
-    const st = useAsync(() => api.actuals({
+    const st = useAsync((signal) => api.actuals({
         ...scopeParams(scope),
         portfolioId: portfolio,
         t0Date: t0
-    }), [scope.kind, scope.id, portfolio, t0]);
+    }, {signal}), [scope.kind, scope.id, portfolio, t0]);
     return (
         <Async state={st} what="actuals">{(d) => (
             <>

@@ -1,12 +1,12 @@
 package com.forecast.ccar.controller;
 
+import com.ccar.common.error.CcarException;
+import com.ccar.common.error.ErrorCode;
 import com.forecast.ccar.model.BuNode;
 import com.forecast.ccar.service.BuHierarchyService;
 import com.forecast.ccar.service.KdbService;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 import java.util.Map;
@@ -31,13 +31,13 @@ public class CcarForecastController {
     /** Whole BU tree, or the top {@code depth} levels below the root when depth is given. */
     @GetMapping(value = "/bu-hierarchy", produces = MediaType.APPLICATION_JSON_VALUE)
     public BuNode getBuHierarchy(@RequestParam(required = false) Integer depth) {
-        return hierarchyService.getHierarchy(depth);
+        return hierarchyService.getHierarchy(checkDepth(depth));
     }
 
     /** Subtree rooted at a BU (default: the node plus its direct children). */
     @GetMapping(value = "/bu-hierarchy/{buId}", produces = MediaType.APPLICATION_JSON_VALUE)
     public BuNode getBuNode(@PathVariable long buId, @RequestParam(defaultValue = "1") Integer depth) {
-        return hierarchyService.getNode(buId, depth).orElseThrow(() -> notFound(buId));
+        return hierarchyService.getNode(buId, checkDepth(depth)).orElseThrow(() -> notFound(buId));
     }
 
     /** Direct children of a BU, for lazy-loading a UI tree on expand. */
@@ -46,14 +46,22 @@ public class CcarForecastController {
         return hierarchyService.getChildren(buId).orElseThrow(() -> notFound(buId));
     }
 
-    /** Re-reads the CSV into the cache. */
+    /** Re-reads the KDB table into the cache. */
     @PostMapping(value = "/bu-hierarchy/reload", produces = MediaType.APPLICATION_JSON_VALUE)
     public Map<String, Object> reloadBuHierarchy() {
         hierarchyService.reload();
         return Map.of("nodes", hierarchyService.size(), "loadedAt", hierarchyService.loadedAt().toString());
     }
 
-    private static ResponseStatusException notFound(long buId) {
-        return new ResponseStatusException(HttpStatus.NOT_FOUND, "BU " + buId + " not found");
+    private static Integer checkDepth(Integer depth) {
+        if (depth != null && depth < 0) {
+            throw new CcarException(ErrorCode.INVALID_PARAMETER, "depth must be >= 0 but was " + depth)
+                    .with("parameter", "depth");
+        }
+        return depth;
+    }
+
+    private static CcarException notFound(long buId) {
+        return new CcarException(ErrorCode.BU_NOT_FOUND, "BU " + buId + " not found").with("buId", buId);
     }
 }

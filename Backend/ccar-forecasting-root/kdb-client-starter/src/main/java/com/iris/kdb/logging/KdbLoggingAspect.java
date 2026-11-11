@@ -48,7 +48,9 @@ public class KdbLoggingAspect {
 
         } catch (Throwable ex) {
             long ms = (System.nanoTime() - start) / 1_000_000;
-            log.error("KDB {}() failed after {} ms query=[{}]: {}",
+            // WARN without stack trace: the only place the (truncated) query text of a failure is logged.
+            // The stack trace is logged once, at ERROR, by the service's global exception handler.
+            log.warn("KDB {}() failed after {} ms query=[{}]: {}",
                     method, ms, query, ex.toString());
             throw ex;
         }

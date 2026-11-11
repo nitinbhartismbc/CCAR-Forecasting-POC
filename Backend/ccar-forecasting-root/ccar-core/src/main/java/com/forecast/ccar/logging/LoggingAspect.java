@@ -11,7 +11,8 @@ import org.springframework.stereotype.Component;
 import java.util.Arrays;
 
 /**
- * Logs entry/exit, duration and exceptions for controller and service beans.
+ * Logs entry/exit and duration for controller and service beans (failures only at DEBUG - the global
+ * exception handler logs each failure exactly once).
  * Arguments and results are only logged at DEBUG and are truncated.
  * KDB calls via KdbTemplate are logged separately by the kdb-starter's own aspect.
  */
@@ -49,7 +50,8 @@ public class LoggingAspect {
 
         } catch (Throwable ex) {
             long ms = (System.nanoTime() - start) / 1_000_000;
-            log.error("x {}() failed after {} ms: {}", method, ms, ex.toString());
+            // DEBUG only: the failure is logged once (ERROR + stack for 5xx) by GlobalExceptionHandler.
+            log.debug("x {}() failed after {} ms: {}", method, ms, ex.toString());
             throw ex;
         }
     }

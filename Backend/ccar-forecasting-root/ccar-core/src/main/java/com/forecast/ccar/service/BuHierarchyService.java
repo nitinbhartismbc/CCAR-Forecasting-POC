@@ -1,10 +1,13 @@
 package com.forecast.ccar.service;
 
+import com.ccar.common.error.CcarException;
+import com.ccar.common.error.ErrorCode;
 import com.forecast.ccar.model.BuNode;
 import com.iris.kdb.service.KdbTemplate;
 import com.kx.c;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -24,6 +27,17 @@ import java.util.*;
  * <p>
  * The cached tree is published as an immutable snapshot (children lists are unmodifiable), so it is
  * safe to read concurrently and can be swapped atomically via {@link #reload()}.
+ * <p>
+ * Error handling:
+ * <ul>
+ *   <li>KDB failures propagate as the starter's {@code KdbException}s (mapped to 503/504/502).</li>
+ *   <li>Bad table content becomes {@link ErrorCode#BU_HIERARCHY_INVALID} (500); the detail is generic, the
+ *       row-level cause is logged.</li>
+ *   <li>While nothing is cached and the last load failed less than {@code ccar.bu-hierarchy.retry-interval-ms}
+ *       ago, requests fail fast with {@link ErrorCode#BU_HIERARCHY_UNAVAILABLE} (503 + Retry-After) instead of
+ *       each one queueing on the lock and hammering a KDB that is down.</li>
+ *   <li>A failed reload keeps serving the previous snapshot.</li>
+ * </ul>
  */
 @Service
 public class BuHierarchyService {
@@ -37,18 +51,28 @@ public class BuHierarchyService {
 
     private final KdbTemplate kdbTemplate;
     private final String table;
+    private final long retryIntervalMs;
     private volatile Snapshot snapshot;
+    /** Epoch millis before which no lazy (request-triggered) load is attempted; 0 = no back-off active. */
+    private volatile long nextRetryAt;
 
     private record Snapshot(BuNode root, Map<Long, BuNode> byId, Instant loadedAt) {
     }
 
+    @Autowired
     public BuHierarchyService(KdbTemplate kdbTemplate,
-                              @Value("${ccar.bu-hierarchy.table:BU_HIERARCHY}") String table) {
+                              @Value("${ccar.bu-hierarchy.table:BU_HIERARCHY}") String table,
+                              @Value("${ccar.bu-hierarchy.retry-interval-ms:30000}") long retryIntervalMs) {
         if (!table.matches("[A-Za-z][A-Za-z0-9_.]*")) {
             throw new IllegalArgumentException("Invalid KDB table name for BU hierarchy: " + table);
         }
         this.kdbTemplate = kdbTemplate;
         this.table = table;
+        this.retryIntervalMs = retryIntervalMs;
+    }
+
+    public BuHierarchyService(KdbTemplate kdbTemplate, String table) {
+        this(kdbTemplate, table, 30_000);
     }
 
     /** Warm the cache on startup; a failure here is logged and retried on first request. */
@@ -57,7 +81,8 @@ public class BuHierarchyService {
         try {
             reload();
         } catch (RuntimeException e) {
-            log.error("BU hierarchy could not be loaded at startup from KDB table {}: {}", table, e.getMessage(), e);
+            log.error("BU hierarchy could not be loaded at startup from KDB table {} (next attempt on first request "
+                    + "after {} ms): {}", table, retryIntervalMs, e.toString(), e);
         }
     }
 
@@ -98,20 +123,41 @@ public class BuHierarchyService {
         return snapshot().loadedAt();
     }
 
-    /** Re-queries the KDB table and atomically replaces the cached tree. */
+    /**
+     * Re-queries the KDB table and atomically replaces the cached tree. On failure the previous tree (if any)
+     * stays in place and the lazy-load back-off is armed.
+     */
     public synchronized void reload() {
+        try {
+            doReload();
+            nextRetryAt = 0;
+        } catch (RuntimeException e) {
+            nextRetryAt = System.currentTimeMillis() + retryIntervalMs;
+            throw e;
+        }
+    }
+
+    private void doReload() {
         log.info("Loading BU hierarchy from KDB table {}", table);
         long start = System.currentTimeMillis();
 
-        // 0! unkeys the result in case BU_HIERARCHY is a keyed table, so we always get a c.Flip back
+        // 0! unkeys the result in case BU_HIERARCHY is a keyed table, so we always get a c.Flip back.
+        // KdbException (KDB down / busy / timeout / q error) propagates unchanged.
         Object result = kdbTemplate.execute("0!select from " + table);
-        if (!(result instanceof c.Flip flip)) {
-            throw new IllegalStateException("Unexpected KDB result for table " + table + ": "
-                    + (result == null ? "null" : result.getClass().getName()));
-        }
 
-        Map<Long, BuNode> byId = readNodes(flip);
-        BuNode root = link(byId);
+        Map<Long, BuNode> byId;
+        BuNode root;
+        try {
+            if (!(result instanceof c.Flip flip)) {
+                throw new IllegalStateException("Unexpected KDB result for table " + table + ": "
+                        + (result == null ? "null" : result.getClass().getName()));
+            }
+            byId = readNodes(flip);
+            root = link(byId);
+        } catch (IllegalStateException e) {
+            throw new CcarException(ErrorCode.BU_HIERARCHY_INVALID,
+                    "The BU hierarchy data is invalid and could not be loaded.", e);
+        }
         snapshot = new Snapshot(root, Collections.unmodifiableMap(byId), Instant.now());
 
         log.info("BU hierarchy loaded: {} node(s), root {} ('{}') in {} ms",
@@ -120,15 +166,22 @@ public class BuHierarchyService {
 
     private Snapshot snapshot() {
         Snapshot s = snapshot;
-        if (s == null) {
-            synchronized (this) {
-                if (snapshot == null) {
-                    reload();
-                }
-                s = snapshot;
-            }
+        if (s != null) {
+            return s;
         }
-        return s;
+        synchronized (this) {
+            if (snapshot == null) {
+                long waitMs = nextRetryAt - System.currentTimeMillis();
+                if (waitMs > 0) {
+                    long retryAfter = Math.max(1, (waitMs + 999) / 1000);
+                    throw new CcarException(ErrorCode.BU_HIERARCHY_UNAVAILABLE,
+                            "The BU hierarchy is not loaded yet because the last load failed. Retry in "
+                                    + retryAfter + " s.", null, retryAfter);
+                }
+                reload();
+            }
+            return snapshot;
+        }
     }
 
     /** Converts the KDB table into nodes (insertion order = table order), recording each node's parent id. */

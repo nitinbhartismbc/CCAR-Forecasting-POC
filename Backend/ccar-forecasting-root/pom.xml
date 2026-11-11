@@ -25,6 +25,7 @@
 
         <!-- Internal modules -->
         <kdb-starter.version>1.0.0</kdb-starter.version>
+        <ccar-common.version>1.0.0</ccar-common.version>
 
         <!-- Third-party versions not managed by Spring Boot -->
         <opencsv.version>5.9</opencsv.version>
@@ -33,8 +34,9 @@
         <javakdb.version>2.2</javakdb.version>
     </properties>
 
-    <!-- Build order is resolved by the reactor: kdb-client-starter is built before ccar -->
+    <!-- Build order is resolved by the reactor: ccar-common and kdb-client-starter are built before the services -->
     <modules>
+        <module>ccar-common</module>
         <module>kdb-client-starter</module>
         <module>ccar-core</module>
         <module>ccar-user-service</module>
@@ -43,6 +45,11 @@
 
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>com.ccar</groupId>
+                <artifactId>ccar-common</artifactId>
+                <version>${ccar-common.version}</version>
+            </dependency>
             <dependency>
                 <groupId>com.iris.kdb</groupId>
                 <artifactId>kdb-starter</artifactId>

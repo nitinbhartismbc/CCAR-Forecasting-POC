@@ -1,14 +1,22 @@
 import {useMemo} from "react";
 import {measures, measureName, money, pickIdx, periodMonth} from "../utils.js";
+import {messageFor} from "../api/errors.js";
+
+// Shows a backend/network error the same way everywhere: what failed, a message chosen by errorCode, and the
+// correlation id ("Reference") support can search for in every service log.
+export function ErrorNotice({error, what, onRetry, className = "state-box error"}) {
+    return (
+        <div className={className} role="alert">
+            <span>Couldn’t load {what}. {messageFor(error)}
+                {error?.correlationId && <small>Reference: {error.correlationId}</small>}</span>
+            {onRetry && <button className="button small" onClick={onRetry}>Retry</button>}
+        </div>
+    );
+}
 
 export function Async({state, what, children}) {
     if (state.loading) return <div className="state-box">Loading {what}…</div>;
-    if (state.error) return (
-        <div className="state-box error">
-            <span>Couldn’t load {what}. Check that the backend is running on localhost:8081, then retry. <small>{state.error.message}</small></span>
-            <button className="button small" onClick={state.reload}>Retry</button>
-        </div>
-    );
+    if (state.error) return <ErrorNotice error={state.error} what={what} onRetry={state.reload}/>;
     return children(state.data);
 }
 

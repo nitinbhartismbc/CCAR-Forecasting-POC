@@ -64,7 +64,7 @@ public class KdbMetricsController {
         response.put("waitingThreads", pool.getWaitingThreads());
         response.put("maxPoolSize", max);
         response.put("utilizationPercent",
-                (active * 100.0) / max);
+                max > 0 ? (active * 100.0) / max : 0.0); // maxTotal < 0 means "unbounded" in commons-pool2
 
         return response;
     }

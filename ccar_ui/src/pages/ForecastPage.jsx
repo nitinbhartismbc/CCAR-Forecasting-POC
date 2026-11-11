@@ -13,11 +13,11 @@ const RangeSelect = ({range, setRange}) => (
 );
 
 function AggregateTab({scope, t0, portfolio, measure, setMeasure, range, setRange}) {
-    const st = useAsync(() => api.forecast({
+    const st = useAsync((signal) => api.forecast({
         ...scopeParams(scope),
         portfolioId: portfolio,
         t0Date: t0
-    }), [scope.kind, scope.id, portfolio, t0]);
+    }, {signal}), [scope.kind, scope.id, portfolio, t0]);
     return (
         <Async state={st} what="the forecast">{(d) => (
             <>
@@ -51,14 +51,14 @@ function DetailsTab({scope, t0, portfolio, measure, setMeasure, range, setRange,
         }, 350);
         return () => clearTimeout(t);
     }, [q]);
-    const st = useAsync(() => api.forecastChildren({
+    const st = useAsync((signal) => api.forecastChildren({
         ...scopeParams(scope),
         portfolioId: portfolio,
         t0Date: t0,
         page,
         size,
         search
-    }), [scope.kind, scope.id, portfolio, t0, page, size, search]);
+    }, {signal}), [scope.kind, scope.id, portfolio, t0, page, size, search]);
     return (
         <div className="table-card">
             <div className="section-heading table-heading">

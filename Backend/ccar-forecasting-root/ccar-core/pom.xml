@@ -68,6 +68,12 @@
 		<artifactId>kdb-starter</artifactId>
 		</dependency>
 
+		<!-- Shared error catalogue, problem format and correlation-id filter -->
+		<dependency>
+			<groupId>com.ccar</groupId>
+			<artifactId>ccar-common</artifactId>
+		</dependency>
+
 	</dependencies>
 	<build>
 		<plugins>

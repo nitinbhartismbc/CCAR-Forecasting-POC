@@ -31,6 +31,23 @@
 		</dependency>
 
 
+		<!-- Circuit breaker + time limiter for downstream routes (CircuitBreaker gateway filter) -->
+		<dependency>
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-starter-circuitbreaker-reactor-resilience4j</artifactId>
+		</dependency>
+
+		<!--
+			Shared error-code catalogue, problem format and correlation-id conventions.
+			All of ccar-common's Spring dependencies are optional, so it adds no Boot 4 jars to this Boot 3 app.
+			Build from the root (./mvnw install) so the module is available.
+		-->
+		<dependency>
+			<groupId>com.ccar</groupId>
+			<artifactId>ccar-common</artifactId>
+			<version>1.0.0</version>
+		</dependency>
+
 		<!-- Test -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
