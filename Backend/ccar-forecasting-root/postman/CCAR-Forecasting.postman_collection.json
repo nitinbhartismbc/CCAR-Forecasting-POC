@@ -1,0 +1,2339 @@
+{
+  "info": {
+    "_postman_id": "290d320b-44c7-4360-8a34-0652df44b3c4",
+    "name": "CCAR Forecasting API",
+    "description": "Happy-path and negative tests for the CCAR Forecasting POC through the API gateway.\n\n**Run order:** use the Collection Runner on the whole collection (folders 01-10 in order). Folder 01 registers a fresh user and stores the JWT; folder 10 deletes it again.\n\n**Environment:** import `CCAR-Local.postman_environment.json` and select it.\n\n**Every response** is also checked against the shared contract: `X-Correlation-Id` echoed, and every 4xx/5xx is RFC 9457 problem+json with `errorCode`, `correlationId` (equal to the header), `service` and `timestamp`.\n\n**Folder 03** needs KDB+ with the forecast_ccar and BU_HIERARCHY tables. **Folder 08** only runs its checks when a dependency is stopped; otherwise its tests are skipped.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Every request carries a correlation id (unless the request sets its own), so each call can be found",
+          "// in the gateway, ccar-core and user-service logs. The id is kept in {{lastCorrelationId}}.",
+          "if (!pm.request.headers.has('X-Correlation-Id')) {",
+          "    const id = 'pm-' + pm.variables.replaceIn('{{$guid}}');",
+          "    pm.request.headers.upsert({ key: 'X-Correlation-Id', value: id });",
+          "}",
+          "pm.collectionVariables.set('lastCorrelationId', pm.variables.replaceIn(pm.request.headers.get('X-Correlation-Id')));"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Checks applied to EVERY response: correlation id echoed, and errors in the shared problem+json format.",
+          "pm.test('[contract] X-Correlation-Id header is returned', () => {",
+          "    pm.expect(pm.response.headers.get('X-Correlation-Id'), 'X-Correlation-Id').to.be.a('string').and.not.empty;",
+          "});",
+          "if (pm.response.code >= 400) {",
+          "    pm.test('[contract] error body is RFC 9457 problem+json with CCAR fields', () => {",
+          "        const body = pm.response.json();",
+          "        pm.expect(body).to.include.keys('type', 'title', 'status', 'detail', 'errorCode', 'correlationId', 'service', 'timestamp');",
+          "        pm.expect(body.status, 'body status matches HTTP status').to.eql(pm.response.code);",
+          "        pm.expect(body.type).to.match(/^urn:ccar:error:/);",
+          "        pm.expect(body.correlationId, 'body correlationId equals header').to.eql(pm.response.headers.get('X-Correlation-Id'));",
+          "    });",
+          "    pm.test('[contract] no internals leaked in detail', () => {",
+          "        const detail = String(pm.response.json().detail || '');",
+          "        pm.expect(detail).to.not.match(/Exception|select |SQL|\\bat [a-z]+\\./i);",
+          "    });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "email",
+      "value": ""
+    },
+    {
+      "key": "email2",
+      "value": ""
+    },
+    {
+      "key": "userId",
+      "value": ""
+    },
+    {
+      "key": "userId2",
+      "value": ""
+    },
+    {
+      "key": "buId",
+      "value": ""
+    },
+    {
+      "key": "rootBuId",
+      "value": ""
+    },
+    {
+      "key": "lastCorrelationId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "01 Auth - happy path",
+      "description": "Register a fresh user and log in. The JWT is stored in {{token}} and used by every protected request (collection-level Bearer auth). Run this folder first.",
+      "item": [
+        {
+          "name": "Register user",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Analyst\",\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\",\n  \"address\": \"1 Test Street\",\n  \"phone\": \"555-0100\",\n  \"preferences\": \"dark-mode\"\n}"
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// unique email per run so the collection can be re-run without restarting user-service",
+                  "const stamp = Date.now();",
+                  "pm.collectionVariables.set('email', `pm.analyst.${stamp}@example.com`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "const u = pm.response.json();",
+                  "pm.test('returns the new user without password', () => {",
+                  "    pm.expect(u).to.include.keys('id', 'name', 'email', 'createdAt');",
+                  "    pm.expect(u).to.not.have.property('password');",
+                  "    pm.expect(u).to.not.have.property('passwordHash');",
+                  "    pm.expect(u.email).to.eql(pm.collectionVariables.get('email'));",
+                  "});",
+                  "pm.collectionVariables.set('userId', u.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "pm.test('returns token, expiresIn and userId', () => {",
+                  "    pm.expect(r.token).to.be.a('string').and.match(/^[\\w-]+\\.[\\w-]+\\.[\\w-]+$/);",
+                  "    pm.expect(r.expiresIn).to.be.above(0);",
+                  "    pm.expect(r.userId).to.eql(Number(pm.collectionVariables.get('userId')));",
+                  "});",
+                  "pm.collectionVariables.set('token', r.token);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 Users - happy path",
+      "description": "Read and update users through the gateway with the JWT.",
+      "item": [
+        {
+          "name": "List users",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test('list contains the registered user', () => {",
+                  "    const ids = pm.response.json().map(u => u.id);",
+                  "    pm.expect(ids).to.include(Number(pm.collectionVariables.get('userId')));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get user by id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test('returns the same user', () => pm.expect(pm.response.json().email).to.eql(pm.collectionVariables.get('email')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update user",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Analyst (updated)\",\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\",\n  \"address\": \"2 Updated Road\",\n  \"phone\": \"555-0101\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test('fields updated', () => {",
+                  "    const u = pm.response.json();",
+                  "    pm.expect(u.name).to.eql('Postman Analyst (updated)');",
+                  "    pm.expect(u.address).to.eql('2 Updated Road');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 Forecast & BU hierarchy - happy path",
+      "description": "Requires ccar-core running and KDB+ reachable with the forecast_ccar and BU_HIERARCHY tables loaded.",
+      "item": [
+        {
+          "name": "Get forecast_ccar",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/forecast-ccar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "forecast-ccar"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test('wrapped in forecast_ccar.data', () => {",
+                  "    pm.expect(pm.response.json().forecast_ccar.data).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get BU hierarchy (depth=1)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy?depth=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "bu-hierarchy"
+              ],
+              "query": [
+                {
+                  "key": "depth",
+                  "value": "1"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const root = pm.response.json();",
+                  "pm.test('root node shape', () => {",
+                  "    pm.expect(root).to.include.keys('id', 'name', 'levelId', 'parentId', 'childCount', 'children');",
+                  "    pm.expect(root.parentId).to.eql(null);",
+                  "});",
+                  "pm.test('depth=1 returns children without grandchildren', () => {",
+                  "    root.children.forEach(c => pm.expect(c.children).to.be.an('array').that.is.empty);",
+                  "});",
+                  "pm.collectionVariables.set('rootBuId', root.id);",
+                  "pm.collectionVariables.set('buId', root.children.length ? root.children[0].id : root.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get full BU hierarchy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "bu-hierarchy"
+              ]
+            },
+            "description": "Returns the whole tree; can be large."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test('root matches', () => pm.expect(pm.response.json().id).to.eql(Number(pm.collectionVariables.get('rootBuId'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get BU node (depth=1)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy/{{buId}}?depth=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "bu-hierarchy",
+                "{{buId}}"
+              ],
+              "query": [
+                {
+                  "key": "depth",
+                  "value": "1"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test('returns the requested node', () => pm.expect(pm.response.json().id).to.eql(Number(pm.collectionVariables.get('buId'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get BU node (depth=0)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy/{{buId}}?depth=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "bu-hierarchy",
+                "{{buId}}"
+              ],
+              "query": [
+                {
+                  "key": "depth",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test('no children returned, childCount kept', () => {",
+                  "    const n = pm.response.json();",
+                  "    pm.expect(n.children).to.be.empty;",
+                  "    pm.expect(n.childCount).to.be.at.least(0);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get BU children",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy/{{buId}}/children",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "bu-hierarchy",
+                "{{buId}}",
+                "children"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test('array of direct children', () => {",
+                  "    const kids = pm.response.json();",
+                  "    pm.expect(kids).to.be.an('array');",
+                  "    kids.forEach(k => pm.expect(k.parentId).to.eql(Number(pm.collectionVariables.get('buId'))));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reload BU hierarchy",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy/reload",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "bu-hierarchy",
+                "reload"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test('reports node count and load time', () => {",
+                  "    const r = pm.response.json();",
+                  "    pm.expect(r.nodes).to.be.above(0);",
+                  "    pm.expect(r.loadedAt).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 Correlation id / tracing",
+      "description": "The gateway keeps a caller's log-safe X-Correlation-Id and replaces an unsafe one.",
+      "item": [
+        {
+          "name": "Caller id is kept and echoed",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Correlation-Id",
+                "value": "pm-trace-12345"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test('same id echoed', () => pm.expect(pm.response.headers.get('X-Correlation-Id')).to.eql('pm-trace-12345'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unsafe id is replaced",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Correlation-Id",
+                "value": "bad id <script>"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test('replaced by a generated id', () => {",
+                  "    const id = pm.response.headers.get('X-Correlation-Id');",
+                  "    pm.expect(id).to.not.include('<script>');",
+                  "    pm.expect(id).to.match(/^[A-Za-z0-9._:-]{1,128}$/);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Error body carries the same id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Correlation-Id",
+                "value": "pm-trace-err-1"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/999999999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "999999999"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 USER_NOT_FOUND\", () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"USER_NOT_FOUND\");",
+                  "});",
+                  "pm.test('correlationId in body equals sent id', () => pm.expect(pm.response.json().correlationId).to.eql('pm-trace-err-1'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 Negative - authentication",
+      "description": "Gateway JWT checks and login failures. All return 401 in the shared problem format.",
+      "item": [
+        {
+          "name": "No token -> 401 UNAUTHORIZED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy?depth=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "bu-hierarchy"
+              ],
+              "query": [
+                {
+                  "key": "depth",
+                  "value": "1"
+                }
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"401 UNAUTHORIZED\", () => {",
+                  "    pm.response.to.have.status(401);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"UNAUTHORIZED\");",
+                  "});",
+                  "pm.test('WWW-Authenticate header present', () => pm.expect(pm.response.headers.get('WWW-Authenticate')).to.match(/^Bearer/));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Non-Bearer scheme -> 401 UNAUTHORIZED",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Basic dXNlcjpwYXNz"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"401 UNAUTHORIZED\", () => {",
+                  "    pm.response.to.have.status(401);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"UNAUTHORIZED\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Garbage token -> 401 TOKEN_INVALID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "not-a-jwt",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"401 TOKEN_INVALID\", () => {",
+                  "    pm.response.to.have.status(401);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"TOKEN_INVALID\");",
+                  "});",
+                  "pm.test('RFC 6750 invalid_token', () => pm.expect(pm.response.headers.get('WWW-Authenticate')).to.include('invalid_token'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Wrong signature -> 401 TOKEN_INVALID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{foreignToken}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Builds an HS512 JWT in the Postman sandbox (CryptoJS) so expired / wrongly-signed tokens can be tested.",
+                  "function b64url(wordArray) {",
+                  "    return CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "}",
+                  "function makeJwt(payload, base64Secret) {",
+                  "    const head = b64url(CryptoJS.enc.Utf8.parse(JSON.stringify({ alg: 'HS512', typ: 'JWT' })));",
+                  "    const body = b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(payload)));",
+                  "    const sig = b64url(CryptoJS.HmacSHA512(head + '.' + body, CryptoJS.enc.Base64.parse(base64Secret)));",
+                  "    return head + '.' + body + '.' + sig;",
+                  "}",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "// valid structure and expiry, but signed with a key the gateway does not know",
+                  "const otherKey = CryptoJS.enc.Base64.stringify(CryptoJS.enc.Utf8.parse('x'.repeat(64)));",
+                  "pm.variables.set('foreignToken', makeJwt({ sub: 'intruder@example.com', iat: now, exp: now + 3600 }, otherKey));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"401 TOKEN_INVALID\", () => {",
+                  "    pm.response.to.have.status(401);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"TOKEN_INVALID\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Expired token -> 401 TOKEN_EXPIRED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{expiredToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "description": "Signs a token with the real secret ({{jwtSecret}}) but an exp one hour in the past."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Builds an HS512 JWT in the Postman sandbox (CryptoJS) so expired / wrongly-signed tokens can be tested.",
+                  "function b64url(wordArray) {",
+                  "    return CryptoJS.enc.Base64.stringify(wordArray).replace(/=+$/, '').replace(/\\+/g, '-').replace(/\\//g, '_');",
+                  "}",
+                  "function makeJwt(payload, base64Secret) {",
+                  "    const head = b64url(CryptoJS.enc.Utf8.parse(JSON.stringify({ alg: 'HS512', typ: 'JWT' })));",
+                  "    const body = b64url(CryptoJS.enc.Utf8.parse(JSON.stringify(payload)));",
+                  "    const sig = b64url(CryptoJS.HmacSHA512(head + '.' + body, CryptoJS.enc.Base64.parse(base64Secret)));",
+                  "    return head + '.' + body + '.' + sig;",
+                  "}",
+                  "const now = Math.floor(Date.now() / 1000);",
+                  "pm.variables.set('expiredToken', makeJwt({ sub: pm.collectionVariables.get('email'), iat: now - 7200, exp: now - 3600 },",
+                  "    pm.environment.get('jwtSecret') || pm.collectionVariables.get('jwtSecret')));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"401 TOKEN_EXPIRED\", () => {",
+                  "    pm.response.to.have.status(401);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"TOKEN_EXPIRED\");",
+                  "});",
+                  "pm.test('RFC 6750 invalid_token', () => pm.expect(pm.response.headers.get('WWW-Authenticate')).to.include('invalid_token'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login wrong password -> 401 INVALID_CREDENTIALS",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"WrongPassword!1\"\n}"
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"401 INVALID_CREDENTIALS\", () => {",
+                  "    pm.response.to.have.status(401);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"INVALID_CREDENTIALS\");",
+                  "});",
+                  "pm.test('generic message (no account enumeration)', () => pm.expect(pm.response.json().detail).to.eql('Invalid email or password'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login unknown email -> 401 INVALID_CREDENTIALS",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"nobody.{{$timestamp}}@example.com\",\n  \"password\": \"Whatever!1\"\n}"
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"401 INVALID_CREDENTIALS\", () => {",
+                  "    pm.response.to.have.status(401);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"INVALID_CREDENTIALS\");",
+                  "});",
+                  "pm.test('same message as wrong password', () => pm.expect(pm.response.json().detail).to.eql('Invalid email or password'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login missing fields -> 400 VALIDATION_FAILED",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"\",\n  \"password\": \"\"\n}"
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 VALIDATION_FAILED\", () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"VALIDATION_FAILED\");",
+                  "});",
+                  "pm.test('lists both fields', () => {",
+                  "    const fields = pm.response.json().errors.map(e => e.field).sort();",
+                  "    pm.expect(fields).to.eql(['email', 'password']);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 Negative - users",
+      "description": "Validation, conflicts, not-found and HTTP-level errors on /users.",
+      "item": [
+        {
+          "name": "Register duplicate email -> 409 DUPLICATE_EMAIL",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Duplicate\",\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"409 DUPLICATE_EMAIL\", () => {",
+                  "    pm.response.to.have.status(409);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"DUPLICATE_EMAIL\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Register invalid body -> 400 VALIDATION_FAILED (3 errors)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"\",\n  \"email\": \"not-an-email\",\n  \"password\": \"\"\n}"
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 VALIDATION_FAILED\", () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"VALIDATION_FAILED\");",
+                  "});",
+                  "const body = pm.response.json();",
+                  "pm.test('every field error listed', () => pm.expect(body.errors.map(e => e.field).sort()).to.eql(['email', 'name', 'password']));",
+                  "pm.test('rejected values are not echoed', () => pm.expect(pm.response.text()).to.not.include('not-an-email'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Register malformed JSON -> 400 MALFORMED_REQUEST",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"name\": \"Broken\", "
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 MALFORMED_REQUEST\", () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"MALFORMED_REQUEST\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Register as text/plain -> 415 UNSUPPORTED_MEDIA_TYPE",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "name=Plain"
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"415 UNSUPPORTED_MEDIA_TYPE\", () => {",
+                  "    pm.response.to.have.status(415);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"UNSUPPORTED_MEDIA_TYPE\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get unknown user -> 404 USER_NOT_FOUND",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/999999999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "999999999"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 USER_NOT_FOUND\", () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"USER_NOT_FOUND\");",
+                  "});",
+                  "pm.test('userId in body', () => pm.expect(pm.response.json().userId).to.eql(999999999));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get user with non-numeric id -> 400 INVALID_PARAMETER",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/abc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "abc"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 INVALID_PARAMETER\", () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"INVALID_PARAMETER\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PATCH user -> 405 METHOD_NOT_ALLOWED",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"name\": \"Patched\" }"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"405 METHOD_NOT_ALLOWED\", () => {",
+                  "    pm.response.to.have.status(405);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"METHOD_NOT_ALLOWED\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unknown path under /users -> 404 RESOURCE_NOT_FOUND",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{userId}}/unknown",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}",
+                "unknown"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 RESOURCE_NOT_FOUND\", () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"RESOURCE_NOT_FOUND\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update unknown user -> 404 USER_NOT_FOUND",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/999999999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "999999999"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ghost\",\n  \"email\": \"ghost.{{$timestamp}}@example.com\",\n  \"password\": \"{{password}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 USER_NOT_FOUND\", () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"USER_NOT_FOUND\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Setup: register a second user",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Second User\",\n  \"email\": \"{{email2}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('email2', `pm.second.${Date.now()}@example.com`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('userId2', pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Update to another user's email -> 409 DUPLICATE_EMAIL",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Analyst\",\n  \"email\": \"{{email2}}\",\n  \"password\": \"{{password}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"409 DUPLICATE_EMAIL\", () => {",
+                  "    pm.response.to.have.status(409);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"DUPLICATE_EMAIL\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete unknown user -> 404 USER_NOT_FOUND",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/999999999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "999999999"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 USER_NOT_FOUND\", () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"USER_NOT_FOUND\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07 Negative - forecast & BU hierarchy",
+      "description": "Not-found, bad parameters and HTTP-level errors on ccar-core.",
+      "item": [
+        {
+          "name": "Unknown BU -> 404 BU_NOT_FOUND",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy/999999999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "bu-hierarchy",
+                "999999999"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 BU_NOT_FOUND\", () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"BU_NOT_FOUND\");",
+                  "});",
+                  "pm.test('buId in body', () => pm.expect(pm.response.json().buId).to.eql(999999999));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Children of unknown BU -> 404 BU_NOT_FOUND",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy/999999999/children",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "bu-hierarchy",
+                "999999999",
+                "children"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 BU_NOT_FOUND\", () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"BU_NOT_FOUND\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Non-numeric BU id -> 400 INVALID_PARAMETER",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy/abc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "bu-hierarchy",
+                "abc"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 INVALID_PARAMETER\", () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"INVALID_PARAMETER\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Negative depth -> 400 INVALID_PARAMETER",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy?depth=-1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "bu-hierarchy"
+              ],
+              "query": [
+                {
+                  "key": "depth",
+                  "value": "-1"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 INVALID_PARAMETER\", () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"INVALID_PARAMETER\");",
+                  "});",
+                  "pm.test('names the parameter', () => pm.expect(pm.response.json().parameter).to.eql('depth'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Non-numeric depth -> 400 INVALID_PARAMETER",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy?depth=two",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "bu-hierarchy"
+              ],
+              "query": [
+                {
+                  "key": "depth",
+                  "value": "two"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 INVALID_PARAMETER\", () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"INVALID_PARAMETER\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET on reload endpoint -> 400 (reload is POST only)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy/reload",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "bu-hierarchy",
+                "reload"
+              ]
+            },
+            "description": "GET /bu-hierarchy/reload matches /bu-hierarchy/{buId}, and 'reload' is not a number."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 INVALID_PARAMETER\", () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"INVALID_PARAMETER\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST forecast-ccar -> 405 METHOD_NOT_ALLOWED",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/forecast-ccar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "forecast-ccar"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"405 METHOD_NOT_ALLOWED\", () => {",
+                  "    pm.response.to.have.status(405);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"METHOD_NOT_ALLOWED\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unknown forecast path -> 404 RESOURCE_NOT_FOUND",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/does-not-exist",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "does-not-exist"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 RESOURCE_NOT_FOUND\", () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"RESOURCE_NOT_FOUND\");",
+                  "});",
+                  "pm.test('answered by ccar-core', () => pm.expect(pm.response.json().service).to.eql('ccar'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unknown gateway route -> 404 ROUTE_NOT_FOUND",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/no/such/route",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "no",
+                "such",
+                "route"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 ROUTE_NOT_FOUND\", () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"ROUTE_NOT_FOUND\");",
+                  "});",
+                  "pm.test('answered by the gateway', () => pm.expect(pm.response.json().service).to.eql('ccar-api-gateway'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "08 Resilience - run with a dependency stopped",
+      "description": "These requests check failure handling when a dependency is down. With everything healthy their tests are SKIPPED, not failed. To exercise them: stop KDB+ (or point kdb.host at a dead host), stop ccar-core, or stop ccar-user-service, then run the matching request.",
+      "item": [
+        {
+          "name": "KDB+ down: forecast-ccar -> 503 KDB_UNAVAILABLE",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/forecast-ccar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "forecast-ccar"
+              ]
+            },
+            "description": "Stop KDB+ while ccar-core runs. Expected: 503 KDB_UNAVAILABLE with Retry-After: 30 (504 KDB_TIMEOUT if KDB+ hangs, 503 KDB_POOL_EXHAUSTED under load)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code < 500) {",
+                  "    pm.test.skip(\"dependency is healthy - stop it to exercise this scenario (see request description)\", () => {});",
+                  "} else {",
+                  "    pm.test(\"5xx with one of KDB_UNAVAILABLE, KDB_POOL_EXHAUSTED, KDB_TIMEOUT, KDB_QUERY_FAILED\", () => {",
+                  "        pm.expect([\"KDB_UNAVAILABLE\", \"KDB_POOL_EXHAUSTED\", \"KDB_TIMEOUT\", \"KDB_QUERY_FAILED\"]).to.include(pm.response.json().errorCode);",
+                  "    });",
+                  "    pm.test(\"Retry-After present on 503\", () => {",
+                  "        if (pm.response.code === 503) pm.expect(pm.response.headers.has(\"Retry-After\")).to.be.true;",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "KDB+ down at startup: BU hierarchy -> 503",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy?depth=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "bu-hierarchy"
+              ],
+              "query": [
+                {
+                  "key": "depth",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Start ccar-core with KDB+ down. First call: 503 KDB_UNAVAILABLE; following calls within 30 s: 503 BU_HIERARCHY_UNAVAILABLE with Retry-After (fail fast, KDB+ not hit)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code < 500) {",
+                  "    pm.test.skip(\"dependency is healthy - stop it to exercise this scenario (see request description)\", () => {});",
+                  "} else {",
+                  "    pm.test(\"5xx with one of KDB_UNAVAILABLE, BU_HIERARCHY_UNAVAILABLE, KDB_TIMEOUT\", () => {",
+                  "        pm.expect([\"KDB_UNAVAILABLE\", \"BU_HIERARCHY_UNAVAILABLE\", \"KDB_TIMEOUT\"]).to.include(pm.response.json().errorCode);",
+                  "    });",
+                  "    pm.test(\"Retry-After present on 503\", () => {",
+                  "        if (pm.response.code === 503) pm.expect(pm.response.headers.has(\"Retry-After\")).to.be.true;",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reload while KDB+ down -> 503, old tree kept",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy/reload",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "bu-hierarchy",
+                "reload"
+              ]
+            },
+            "description": "Stop KDB+ after a successful load. Reload fails with 503, but GET bu-hierarchy keeps returning the previously loaded tree."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code < 500) {",
+                  "    pm.test.skip(\"dependency is healthy - stop it to exercise this scenario (see request description)\", () => {});",
+                  "} else {",
+                  "    pm.test(\"5xx with one of KDB_UNAVAILABLE, KDB_TIMEOUT\", () => {",
+                  "        pm.expect([\"KDB_UNAVAILABLE\", \"KDB_TIMEOUT\"]).to.include(pm.response.json().errorCode);",
+                  "    });",
+                  "    pm.test(\"Retry-After present on 503\", () => {",
+                  "        if (pm.response.code === 503) pm.expect(pm.response.headers.has(\"Retry-After\")).to.be.true;",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "ccar-core down -> 503 DOWNSTREAM_UNAVAILABLE",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy?depth=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "bu-hierarchy"
+              ],
+              "query": [
+                {
+                  "key": "depth",
+                  "value": "1"
+                }
+              ]
+            },
+            "description": "Stop ccar-core. The gateway retries the GET twice, then its circuit-breaker fallback answers 503. After repeated failures the circuit opens: 503 CIRCUIT_OPEN."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code < 500) {",
+                  "    pm.test.skip(\"dependency is healthy - stop it to exercise this scenario (see request description)\", () => {});",
+                  "} else {",
+                  "    pm.test(\"5xx with one of DOWNSTREAM_UNAVAILABLE, CIRCUIT_OPEN\", () => {",
+                  "        pm.expect([\"DOWNSTREAM_UNAVAILABLE\", \"CIRCUIT_OPEN\"]).to.include(pm.response.json().errorCode);",
+                  "    });",
+                  "    pm.test(\"Retry-After present on 503\", () => {",
+                  "        if (pm.response.code === 503) pm.expect(pm.response.headers.has(\"Retry-After\")).to.be.true;",
+                  "    });",
+                  "}",
+                  "if (pm.response.code >= 500) pm.test('answered by the gateway', () => pm.expect(pm.response.json().service).to.eql('ccar-api-gateway'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "user-service down: login -> 503 DOWNSTREAM_UNAVAILABLE",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "Stop ccar-user-service. Login is public, so the request reaches routing and the fallback answers 503."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code < 500) {",
+                  "    pm.test.skip(\"dependency is healthy - stop it to exercise this scenario (see request description)\", () => {});",
+                  "} else {",
+                  "    pm.test(\"5xx with one of DOWNSTREAM_UNAVAILABLE, CIRCUIT_OPEN\", () => {",
+                  "        pm.expect([\"DOWNSTREAM_UNAVAILABLE\", \"CIRCUIT_OPEN\"]).to.include(pm.response.json().errorCode);",
+                  "    });",
+                  "    pm.test(\"Retry-After present on 503\", () => {",
+                  "        if (pm.response.code === 503) pm.expect(pm.response.headers.has(\"Retry-After\")).to.be.true;",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "09 Direct service endpoints (debug)",
+      "description": "Called on ccar-core directly ({{coreDirectUrl}}); the gateway does not route /ccar/kdb/**.",
+      "item": [
+        {
+          "name": "KDB health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{coreDirectUrl}}/kdb/health",
+              "host": [
+                "{{coreDirectUrl}}"
+              ],
+              "path": [
+                "kdb",
+                "health"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test('reports connectivity and pool counts', () => pm.expect(pm.response.json()).to.include.keys('connected', 'activeConnections', 'idleConnections', 'maxPoolSize'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "KDB metrics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{coreDirectUrl}}/kdb/metrics",
+              "host": [
+                "{{coreDirectUrl}}"
+              ],
+              "path": [
+                "kdb",
+                "metrics"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test('reports utilization', () => pm.expect(pm.response.json()).to.include.keys('host', 'utilizationPercent'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "KDB health via gateway -> 404 ROUTE_NOT_FOUND",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/kdb/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "kdb",
+                "health"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            },
+            "description": "Confirms operational endpoints are not exposed through the gateway."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 ROUTE_NOT_FOUND\", () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"ROUTE_NOT_FOUND\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "10 Cleanup",
+      "description": "Deletes the users created by this run and checks they are gone.",
+      "item": [
+        {
+          "name": "Delete second user",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{userId2}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{userId2}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete user",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get deleted user -> 404 USER_NOT_FOUND",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/users/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "{{userId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 USER_NOT_FOUND\", () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"USER_NOT_FOUND\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login as deleted user -> 401 INVALID_CREDENTIALS",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"401 INVALID_CREDENTIALS\", () => {",
+                  "    pm.response.to.have.status(401);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"INVALID_CREDENTIALS\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
