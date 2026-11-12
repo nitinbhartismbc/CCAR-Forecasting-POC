@@ -1,7 +1,7 @@
 # CCAR Forecasting UI
 
-Repo for UI and Backend Code for CCAR Forecasting Code.React + Vite UI for the CCAR forecast. 
-Data comes from the Java service on `http://localhost:8081`
+React + Vite UI for the CCAR forecast. All data comes from the backend through the API gateway on
+`http://localhost:8089`, after signing in.
 
 ## How to Run this CCAR UI
 
@@ -9,8 +9,41 @@ Data comes from the Java service on `http://localhost:8081`
 npm install
 npm run dev        # http://localhost:5173
 ```
-NOT: `.env.development` has `VITE_USE_MOCK=true`. Set it to `false` to call the Java service. Vite does proxy of `/ccar/*` to
-`localhost:8081` (see `vite.config.js`), so we will not need CORS setup in dev environment.
+
+`.env.development` has `VITE_USE_MOCK=true`: the UI uses `src/api/mock.js` and the sign-in page accepts any
+email and password (the password `wrong` shows the error message). Set it to `false` to call the backend. Vite
+proxies `/ccar/*` and `/users/*` to the gateway (`http://localhost:8089`, override with `VITE_GATEWAY_URL`), so
+no CORS setup is needed in development.
+
+## Sign-in and session
+
+1. The app opens on the **Sign in** page when there is no valid session.
+2. The page checks the fields like the backend does (email required and well-formed, password required), then
+   calls `POST /users/login`. Wrong credentials show "The email or password is incorrect."; server-side field
+   errors are shown under each field.
+3. The response `{token, expiresIn, userId}` is stored in `sessionStorage` (`ccar.session`, with the email
+   and the expiry time). It survives a page reload but not closing the tab.
+4. Every API call sends `Authorization: Bearer <token>` (`src/api/client.js`).
+5. The user goes back to the sign-in page, with a message, when:
+   - the token's lifetime runs out (15 s early, so no call leaves with a dying token),
+   - any call returns 401 (`TOKEN_EXPIRED`, `TOKEN_INVALID`, `UNAUTHORIZED`),
+   - they press **Sign out** in the top bar.
+
+## Sign-up
+
+**Create an account** on the sign-in page opens the sign-up page:
+
+- Fields: full name, email, password, confirm password; phone and address are optional.
+- Checked before sending, with the same rules as the backend: name required, valid email, password at least
+  8 characters, and both passwords match. Server-side field errors are shown under each field; an email that
+  is already registered shows "An account with this email already exists. Sign in instead."
+- It calls `POST /users` and does **not** sign the user in. On success it returns to the sign-in page with
+  the email pre-filled and the message "Account created. Sign in with your new password."
+- Mock mode: accounts exist until the page reloads; `taken@example.com` is treated as already registered.
+
+Code: `src/auth/session.js` (storage), `src/auth/LoginPage.jsx` (sign-in form), `src/auth/SignupPage.jsx`
+(sign-up form), `src/auth/AuthLayout.jsx` (shared frame), `src/auth/AuthGate.jsx` (switches between sign-in,
+sign-up and the app).
 
 ## Screens
 - **Forecast**: left nav has option to switch between Business unit and Geography hierarchies.

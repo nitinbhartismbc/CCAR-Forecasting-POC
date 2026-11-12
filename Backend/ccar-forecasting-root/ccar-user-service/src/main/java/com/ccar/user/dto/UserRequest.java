@@ -2,8 +2,13 @@ package com.ccar.user.dto;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 public class UserRequest {
+
+    /** Minimum password length for registration and password changes (the UI enforces the same rule). */
+    public static final int PASSWORD_MIN_LENGTH = 8;
 
     @NotBlank(message = "name is required")
     private String name;
@@ -12,7 +17,10 @@ public class UserRequest {
     @Email(message = "email must be valid")
     private String email;
 
-    @NotBlank(message = "password is required")
+    // @NotNull + @Size rather than @NotBlank + @Size, so an empty password reports one error, not two.
+    // Login (LoginRequest) deliberately has no length rule, so existing shorter passwords can still sign in.
+    @NotNull(message = "password is required")
+    @Size(min = PASSWORD_MIN_LENGTH, message = "password must be at least " + PASSWORD_MIN_LENGTH + " characters")
     private String password;
 
     private String address;

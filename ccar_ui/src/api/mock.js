@@ -5,6 +5,7 @@
 // but are not exact sums of their children.
 
 import { monthKey } from "../utils.js";
+import { ApiError } from "./errors.js";
 
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -292,6 +293,50 @@ const fcRows = (e, portfolio, t0) =>
       measure: ACCOUNTS[a][0],
       values: fc(a, e, portfolio, t0),
     }));
+
+// Mock sign-in: any well-formed email with a non-empty password works, except the password "wrong",
+// which returns the same 401 the real service gives for bad credentials.
+export async function mockLogin(email, password) {
+  await delay(300);
+  const errors = [];
+  if (!email) errors.push({field: "email", message: "Email is required"});
+  else if (!/^[^@\s]+@[^@\s]+$/.test(email)) errors.push({field: "email", message: "Email must be valid"});
+  if (!password) errors.push({field: "password", message: "Password is required"});
+  if (errors.length) {
+    throw new ApiError({status: 400, errorCode: "VALIDATION_FAILED", detail: "Request validation failed",
+      errors, correlationId: "mock", path: "/users/login"});
+  }
+  if (password === "wrong") {
+    throw new ApiError({status: 401, errorCode: "INVALID_CREDENTIALS", detail: "Invalid email or password",
+      correlationId: "mock", path: "/users/login"});
+  }
+  return {token: `mock.${Date.now().toString(36)}.token`, expiresIn: 3600, userId: 1};
+}
+
+// Mock sign-up: same rules as the backend's UserRequest. Emails registered in this page session (and
+// "taken@example.com") return 409 DUPLICATE_EMAIL.
+const mockEmails = new Set(["taken@example.com"]);
+export async function mockRegister({name, email, password, phone, address}) {
+  await delay(300);
+  const errors = [];
+  if (!name?.trim()) errors.push({field: "name", message: "name is required"});
+  if (!email?.trim()) errors.push({field: "email", message: "email is required"});
+  else if (!/^[^@\s]+@[^@\s]+$/.test(email)) errors.push({field: "email", message: "email must be valid"});
+  if (password == null || password.length < 8) {
+    errors.push({field: "password", message: "password must be at least 8 characters"});
+  }
+  if (errors.length) {
+    throw new ApiError({status: 400, errorCode: "VALIDATION_FAILED", detail: "Request validation failed",
+      errors, correlationId: "mock", path: "/users"});
+  }
+  if (mockEmails.has(email.toLowerCase())) {
+    throw new ApiError({status: 409, errorCode: "DUPLICATE_EMAIL",
+      detail: `A user with email ${email} already exists`, correlationId: "mock", path: "/users"});
+  }
+  mockEmails.add(email.toLowerCase());
+  return {id: mockEmails.size, name, email, phone: phone ?? null, address: address ?? null,
+    createdAt: new Date().toISOString()};
+}
 
 export async function mockCall(path, p = {}) {
   await delay(150 + Math.random() * 250);

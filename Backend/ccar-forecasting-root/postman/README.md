@@ -2,7 +2,7 @@
 
 | File | Purpose |
 |---|---|
-| `CCAR-Forecasting.postman_collection.json` | 56 requests with tests: happy path, negative cases, tracing, resilience |
+| `CCAR-Forecasting.postman_collection.json` | 57 requests with tests: happy path, negative cases, tracing, resilience |
 | `CCAR-Local.postman_environment.json` | `baseUrl` (gateway :8089), `coreDirectUrl` (:8081/ccar), `password`, `jwtSecret` |
 
 ## Use it
@@ -22,7 +22,7 @@ Command line (optional): `npx newman run CCAR-Forecasting.postman_collection.jso
 | 03 Forecast & BU hierarchy - happy path | forecast_ccar, BU tree (depth 0/1/full), node, children, reload. Stores `{{buId}}` |
 | 04 Correlation id / tracing | Caller id echoed, unsafe id replaced, id in error body |
 | 05 Negative - authentication | No token, non-Bearer, garbage, wrong signature, expired token, bad login, login validation |
-| 06 Negative - users | Duplicate email (create and update), validation, malformed JSON, 415, 404, 400, 405 |
+| 06 Negative - users | Duplicate email (create and update), validation, password under 8 characters, malformed JSON, 415, 404, 400, 405 |
 | 07 Negative - forecast & BU | Unknown BU, bad id/depth, 405, unknown path (ccar-core 404 vs gateway 404) |
 | 08 Resilience | KDB+ / ccar-core / user-service down → 503/504. **Tests are skipped while everything is healthy**; stop the dependency named in the request to exercise them |
 | 09 Direct service endpoints | `/kdb/health`, `/kdb/metrics` on :8081, and proof they are not exposed on the gateway |

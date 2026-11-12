@@ -26,6 +26,8 @@ const MESSAGES = {
     TOKEN_EXPIRED: "Your session has expired. Please sign in again.",
     TOKEN_INVALID: "Your session is no longer valid. Please sign in again.",
     FORBIDDEN: "You don’t have access to this data.",
+    INVALID_CREDENTIALS: "The email or password is incorrect.",
+    DUPLICATE_EMAIL: "An account with this email already exists. Sign in instead.",
 
     BU_NOT_FOUND: "That business unit doesn’t exist.",
     BU_HIERARCHY_UNAVAILABLE: "The business-unit hierarchy isn’t available yet.",

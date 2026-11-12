@@ -450,8 +450,8 @@ Request bodies:
 
 | Endpoint | Body | Rules |
 |---|---|---|
-| `POST /users`, `PUT /users/{id}` | `{"name","email","password","address","phone","preferences"}` | `name`, `email` (valid format), `password` required; others optional |
-| `POST /users/login` | `{"email","password"}` | both required, `email` valid format |
+| `POST /users`, `PUT /users/{id}` | `{"name","email","password","address","phone","preferences"}` | `name`, `email` (valid format), `password` (at least 8 characters) required; others optional |
+| `POST /users/login` | `{"email","password"}` | both required, `email` valid format; no length rule, so older shorter passwords still sign in |
 
 ### Direct only (not routed by the gateway)
 
@@ -527,9 +527,9 @@ Full details: [ERROR_HANDLING.md](ERROR_HANDLING.md).
 
 ## Known gaps
 
-- The UI's Vite dev proxy sends `/ccar/*` straight to ccar-core (:8081), skipping the gateway. Routing it
-  through :8089 needs a login screen in the UI, otherwise every call gets `401`.
-- The UI calls paths such as `/ccar/bu/hierarchy` and `/ccar/portfolios` that ccar-core does not expose yet.
+- The UI now signs in and goes through the gateway (:8089), but its data calls use paths such as
+  `/ccar/bu/hierarchy` that are not routed by the gateway or implemented in ccar-core yet, so with
+  `VITE_USE_MOCK=false` those screens show "endpoint not found" after signing in.
 - Seeded users in `data.sql` cannot log in (SHA-256 hashes vs BCrypt); register new users instead.
 - H2 is in memory: users are lost when user-service restarts.
 - Single instances with fixed URLs; no service discovery or scaling.

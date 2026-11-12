@@ -101,6 +101,27 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void shortPassword_is400WithLengthMessage() throws Exception {
+        mvc.perform(post("/users").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Jane\",\"email\":\"jane@example.com\",\"password\":\"Short1!\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorCode").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.errors", hasSize(1)))
+                .andExpect(jsonPath("$.errors[0].field").value("password"))
+                .andExpect(jsonPath("$.errors[0].message").value("password must be at least 8 characters"));
+    }
+
+    @Test
+    void eightCharacterPassword_isAccepted() throws Exception {
+        when(userService.createUser(any(UserRequest.class))).thenReturn(new com.ccar.user.dto.UserResponse(
+                1L, "Jane", "jane@example.com", null, null, java.time.LocalDateTime.now()));
+
+        mvc.perform(post("/users").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Jane\",\"email\":\"jane@example.com\",\"password\":\"Exactly8\"}"))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
     void malformedJson_is400MalformedRequest() throws Exception {
         mvc.perform(post("/users").contentType(MediaType.APPLICATION_JSON).content("{\"name\": "))
                 .andExpect(status().isBadRequest())

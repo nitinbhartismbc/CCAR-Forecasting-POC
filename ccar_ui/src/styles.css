@@ -996,3 +996,196 @@ button {
     margin-top: 5px;
     font-size: 9.5px
 }
+
+/* ---- Sign-in ------------------------------------------------------------------------------------- */
+.login-shell {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column
+}
+
+.login-main {
+    flex: 1;
+    display: grid;
+    place-items: start center;
+    padding: 72px 24px
+}
+
+.login-card {
+    width: 100%;
+    max-width: 380px;
+    background: #fff;
+    border: 1px solid #e2e8ee;
+    border-radius: 10px;
+    box-shadow: 0 8px 24px #102c4212;
+    padding: 30px 30px 26px;
+    display: grid;
+    gap: 14px
+}
+
+.login-card h1 {
+    margin: -6px 0 0;
+    color: #1d3448;
+    font-size: 22px
+}
+
+.login-sub {
+    margin: -6px 0 4px;
+    font-size: 12px;
+    color: #6b7f91;
+    line-height: 1.5
+}
+
+.login-field {
+    display: grid;
+    gap: 6px
+}
+
+.login-field label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #40566a
+}
+
+.login-field input {
+    border: 1px solid #cbd8e2;
+    border-radius: 6px;
+    padding: 10px 11px;
+    font-size: 13px;
+    color: #1c2b3a;
+    background: #fff
+}
+
+.login-field input:focus {
+    outline: 2px solid #9cc3dc;
+    outline-offset: 1px;
+    border-color: #2b688e
+}
+
+.login-field.has-error input {
+    border-color: #c0533a
+}
+
+.field-error {
+    font-size: 11px;
+    color: #b0432c
+}
+
+.login-error {
+    display: grid;
+    gap: 3px;
+    font-size: 12px;
+    color: #8a2f1c;
+    background: #fdf0ec;
+    border: 1px solid #f2cfc4;
+    border-radius: 6px;
+    padding: 10px 12px
+}
+
+.login-error small {
+    color: #a26a5c;
+    font-size: 10.5px
+}
+
+.button.primary {
+    background: #173b57;
+    border-color: #173b57;
+    color: #fff
+}
+
+.button.primary:hover {
+    background: #1f4b6d
+}
+
+.button:disabled {
+    opacity: .65;
+    cursor: default
+}
+
+.login-submit {
+    margin-top: 4px;
+    padding: 11px 12px;
+    font-size: 12px
+}
+
+.login-hint {
+    margin: 0;
+    font-size: 10.5px;
+    color: #8394a4;
+    line-height: 1.5
+}
+
+.signout-button {
+    border: 1px solid #ffffff40;
+    background: transparent;
+    color: #e5f0f8;
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 10.5px;
+    font-weight: 600
+}
+
+.signout-button:hover {
+    background: #ffffff18
+}
+
+.signout-button:focus-visible, .login-submit:focus-visible {
+    outline: 2px solid #9cc3dc;
+    outline-offset: 2px
+}
+
+.info-banner.success {
+    background: #ebf6ef;
+    border-color: #cbe6d4;
+    color: #2f6b45
+}
+
+.info-banner.success .info-icon {
+    background: #cfe9d8;
+    color: #2f6b45
+}
+
+.field-hint {
+    font-size: 11px;
+    color: #8394a4
+}
+
+.login-optional {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 2px;
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: #9aa7b3
+}
+
+.login-optional::after {
+    content: "";
+    flex: 1;
+    border-top: 1px solid #e2e8ee
+}
+
+.login-switch {
+    margin: 0;
+    font-size: 12px;
+    color: #607488;
+    text-align: center
+}
+
+.login-switch .link-btn {
+    font-size: 12px;
+    font-weight: 600;
+    color: #2b688e;
+    background: none;
+    border: 0;
+    padding: 0;
+    text-decoration: underline;
+    text-underline-offset: 2px
+}
+
+.login-switch .link-btn:focus-visible {
+    outline: 2px solid #9cc3dc;
+    outline-offset: 2px
+}

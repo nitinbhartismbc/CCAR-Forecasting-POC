@@ -6,7 +6,6 @@ import ForecastPage from "./pages/ForecastPage.jsx";
 import ActualsPage from "./pages/ActualsPage.jsx";
 import ComparisonPage from "./pages/ComparisonPage.jsx";
 import {fmtDate, isQuarterEnd} from "./utils.js";
-import {AUTH_EXPIRED_EVENT, messageFor} from "./api/errors.js";
 import {ErrorNotice} from "./components/Common.jsx";
 
 const TITLES = {
@@ -15,19 +14,19 @@ const TITLES = {
     comparison: ["Comparison View", "Compare actual results against the forecast"],
 };
 
-export default function App() {
+function initials(email) {
+    const name = (email || "").split("@")[0];
+    const parts = name.split(/[._-]+/).filter(Boolean);
+    const letters = parts.length > 1 ? parts[0][0] + parts[1][0] : name.slice(0, 2);
+    return (letters || "?").toUpperCase();
+}
+
+export default function App({session, onSignOut}) {
     const [page, setPage] = useState("forecast");
     const [hier, setHier] = useState("BU");            // "BU" | "GEO"
     const [scope, setScope] = useState(null);          // { id, name, level, kind, childCount, trail, navId }
     const [portfolio, setPortfolio] = useState("ALL");
     const [t0, setT0] = useState("");
-    const [authError, setAuthError] = useState(null); // set by the api client on any 401
-
-    useEffect(() => {
-        const onAuthExpired = (e) => setAuthError(e.detail);
-        window.addEventListener(AUTH_EXPIRED_EVENT, onAuthExpired);
-        return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onAuthExpired);
-    }, []);
 
     const nav = useAsync((signal) => api.hierarchy(hier, {signal}), [hier]);
     const pfs = useAsync((signal) => api.portfolios({signal}), []);
@@ -66,7 +65,8 @@ export default function App() {
                 </div>
                 <div className="topbar-spacer"/>
                 <span className="environment-tag">{USE_MOCK ? "POC · MOCK DATA" : "POC · LIVE BACKEND"}</span>
-                <div className="avatar">BP</div>
+                <div className="avatar" title={session?.email}>{initials(session?.email)}</div>
+                <button type="button" className="signout-button" onClick={onSignOut}>Sign out</button>
             </header>
             <div className="app-body">
                 <Sidebar page={page} setPage={setPage} hier={hier} switchHier={switchHier} nav={nav} scope={scope}
@@ -108,9 +108,6 @@ export default function App() {
                     {t0 && !isQuarterEnd(t0) &&
                         <div className="info-banner warn"><span className="info-icon">!</span>T0 {t0} is not a
                             quarter-end date. Forecasts are only produced for 31 Mar, 30 Jun, 30 Sep and 31 Dec.</div>}
-                    {authError &&
-                        <div className="info-banner warn" role="alert"><span className="info-icon">!</span>
-                            {messageFor(authError)}</div>}
                     {t0s.error && <ErrorNotice error={t0s.error} what="the T0 dates" onRetry={t0s.reload}/>}
                     {scope && <div className="scope-note"><span
                         className="info-icon">i</span><span>Selected scope: <strong>{scope.name}</strong> · Level {scope.level} · ID {scope.id}. A parent selection is the aggregate of everything below it, calculated by the backend.</span>

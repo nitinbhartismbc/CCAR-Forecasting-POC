@@ -1,6 +1,6 @@
 {
   "info": {
-    "_postman_id": "290d320b-44c7-4360-8a34-0652df44b3c4",
+    "_postman_id": "fa0f7efc-7830-4149-9a52-4d7f65dca5c9",
     "name": "CCAR Forecasting API",
     "description": "Happy-path and negative tests for the CCAR Forecasting POC through the API gateway.\n\n**Run order:** use the Collection Runner on the whole collection (folders 01-10 in order). Folder 01 registers a fresh user and stores the JWT; folder 10 deletes it again.\n\n**Environment:** import `CCAR-Local.postman_environment.json` and select it.\n\n**Every response** is also checked against the shared contract: `X-Correlation-Id` echoed, and every 4xx/5xx is RFC 9457 problem+json with `errorCode`, `correlationId` (equal to the header), `service` and `timestamp`.\n\n**Folder 03** needs KDB+ with the forecast_ccar and BU_HIERARCHY tables. **Folder 08** only runs its checks when a dependency is stopped; otherwise its tests are skipped.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
@@ -1162,6 +1162,51 @@
                   "const body = pm.response.json();",
                   "pm.test('every field error listed', () => pm.expect(body.errors.map(e => e.field).sort()).to.eql(['email', 'name', 'password']));",
                   "pm.test('rejected values are not echoed', () => pm.expect(pm.response.text()).to.not.include('not-an-email'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Register 7-char password -> 400 VALIDATION_FAILED",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "users"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Short Password\",\n  \"email\": \"short.{{$timestamp}}@example.com\",\n  \"password\": \"Abc@123\"\n}"
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 VALIDATION_FAILED\", () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"VALIDATION_FAILED\");",
+                  "});",
+                  "const errs = pm.response.json().errors;",
+                  "pm.test('only the password is rejected', () => pm.expect(errs.map(e => e.field)).to.eql(['password']));",
+                  "pm.test('explains the 8-character minimum', () => pm.expect(errs[0].message).to.eql('password must be at least 8 characters'));"
                 ]
               }
             }
