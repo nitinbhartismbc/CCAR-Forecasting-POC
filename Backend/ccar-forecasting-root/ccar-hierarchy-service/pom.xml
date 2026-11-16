@@ -46,7 +46,7 @@
 			<artifactId>spring-boot-starter-webmvc</artifactId>
 		</dependency>
 
-		<!-- AOP logging -->
+		<!-- Enables ccar-common's LoggingAspect (and the kdb-starter's KdbLoggingAspect) -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-aspectj</artifactId>
@@ -68,7 +68,7 @@
 		<artifactId>kdb-starter</artifactId>
 		</dependency>
 
-		<!-- Shared error catalogue, problem format and correlation-id filter -->
+		<!-- Shared error catalogue, problem format, correlation-id filter and AOP LoggingAspect -->
 		<dependency>
 			<groupId>com.ccar</groupId>
 			<artifactId>ccar-common</artifactId>

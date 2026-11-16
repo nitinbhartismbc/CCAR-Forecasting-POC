@@ -16,7 +16,7 @@
     <packaging>jar</packaging>
     <name>ccar-common</name>
     <description>
-        Shared error-code catalogue, RFC 9457 problem format and correlation-id tracing for all CCAR services.
+        Shared error-code catalogue, RFC 9457 problem format, correlation-id tracing and AOP logging for all CCAR services.
     </description>
 
     <!--
@@ -25,6 +25,11 @@
         a Spring version onto a consumer's classpath; each consumer brings its own Spring.
           - com.ccar.common.error / com.ccar.common.tracing : plain Java + spring-web ProblemDetail (both stacks)
           - com.ccar.common.web                             : servlet only, auto-configured for Spring MVC apps
+                                                              (incl. the shared GlobalExceptionHandler)
+          - com.ccar.common.reactive                        : WebFlux only, auto-configured for the api-gateway
+                                                              (ReactiveGlobalExceptionHandler, ProblemResponseWriter)
+          - com.ccar.common.logging                         : AOP controller/service logging, auto-configured for
+                                                              both stacks when AspectJ is on the classpath
     -->
     <properties>
         <java.version>17</java.version>
@@ -59,6 +64,47 @@
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!--
+            Store-specific error mappings of the shared GlobalExceptionHandler (KdbErrorMapper,
+            PersistenceErrorMapper, ConstraintViolationErrorMapper). Each is registered only when the consuming
+            service has that library, so none of these reach a consumer through ccar-common.
+        -->
+        <dependency>
+            <groupId>com.iris.kdb</groupId>
+            <artifactId>kdb-starter</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-tx</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.validation</groupId>
+            <artifactId>jakarta.validation-api</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- com.ccar.common.reactive: ProblemResponseWriter serialises with the (Boot 3) gateway's Jackson 2 ObjectMapper -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <optional>true</optional>
+        </dependency>
+
+        <!-- com.ccar.common.logging: the AOP LoggingAspect. Consumers bring AspectJ via their AOP starter. -->
+        <dependency>
+            <groupId>org.aspectj</groupId>
+            <artifactId>aspectjweaver</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <!-- Only for timing Mono/Flux results in the reactive api-gateway (ReactiveLogging is loaded only if present) -->
+        <dependency>
+            <groupId>io.projectreactor</groupId>
+            <artifactId>reactor-core</artifactId>
             <optional>true</optional>
         </dependency>
 

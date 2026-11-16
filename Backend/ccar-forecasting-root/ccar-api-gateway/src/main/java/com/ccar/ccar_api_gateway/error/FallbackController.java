@@ -2,6 +2,8 @@ package com.ccar.ccar_api_gateway.error;
 
 import com.ccar.ccar_api_gateway.logging.CorrelationIdWebFilter;
 import com.ccar.common.error.ErrorCode;
+import com.ccar.common.reactive.ProblemResponseWriter;
+import com.ccar.common.reactive.ReactiveErrorClassifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cloud.gateway.support.ServerWebExchangeUtils;
@@ -30,7 +32,7 @@ public class FallbackController {
     @RequestMapping("/fallback/{service}")
     public Mono<Void> fallback(@PathVariable String service, ServerWebExchange exchange) {
         Throwable cause = exchange.getAttribute(ServerWebExchangeUtils.CIRCUITBREAKER_EXECUTION_EXCEPTION_ATTR);
-        ErrorCode code = cause == null ? ErrorCode.DOWNSTREAM_UNAVAILABLE : GatewayErrorClassifier.classify(cause);
+        ErrorCode code = cause == null ? ErrorCode.DOWNSTREAM_UNAVAILABLE : ReactiveErrorClassifier.classify(cause);
         if (!code.isServerError()) {
             code = ErrorCode.DOWNSTREAM_UNAVAILABLE;
         }
@@ -40,6 +42,6 @@ public class FallbackController {
                 cause == null ? "no exception" : cause.toString());
 
         // instance = the client's path, not the internal /fallback/.. forward (see ProblemResponseWriter)
-        return writer.write(exchange, code, GatewayErrorClassifier.detail(code));
+        return writer.write(exchange, code, ReactiveErrorClassifier.detail(code));
     }
 }

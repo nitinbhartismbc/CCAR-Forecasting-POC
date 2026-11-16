@@ -6,7 +6,6 @@ import com.ccar.common.error.ProblemDetailFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.TypeMismatchException;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
@@ -18,6 +17,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.ServletRequestBindingException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.ServletWebRequest;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
@@ -32,29 +32,39 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Base {@code @RestControllerAdvice} for every CCAR servlet service. Each service declares
- * <pre>
- * &#64;RestControllerAdvice
- * public class GlobalExceptionHandler extends CcarExceptionHandler { ...service-specific mappings... }
- * </pre>
- * and gets, for free:
+ * The one {@code @RestControllerAdvice} of every CCAR servlet service (ccar-hierarchy-service, ccar-user-service).
+ * Services do not declare their own: this class is registered by {@link CcarWebAutoConfiguration} and gives
  * <ul>
  *   <li>the shared problem format ({@link ProblemDetailFactory}) for <b>every</b> error - application
  *       {@link CcarException}s, all Spring MVC framework exceptions (bad JSON, wrong types, 405, 415, unknown
  *       path, ...) and unexpected exceptions;</li>
+ *   <li>store-specific mappings through {@link CcarErrorMapper} beans, auto-registered when the store is on the
+ *       classpath: {@link KdbErrorMapper} (kdb-starter), {@link PersistenceErrorMapper} (Spring Data / JPA),
+ *       {@link ConstraintViolationErrorMapper} (Bean Validation). A service adds its own mapping by declaring a
+ *       {@code CcarErrorMapper} bean;</li>
  *   <li>a catch-all that never leaks internals (generic detail + correlation id);</li>
  *   <li>logging in exactly one place: 5xx at ERROR with stack trace, 4xx at WARN as a single line.</li>
  * </ul>
+ * The reactive api-gateway uses {@code com.ccar.common.reactive.ReactiveGlobalExceptionHandler} instead.
  */
-public abstract class CcarExceptionHandler extends ResponseEntityExceptionHandler {
+@RestControllerAdvice
+public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
 
     public static final String GENERIC_SERVER_ERROR =
             "An unexpected error occurred. Quote the correlationId when reporting this issue.";
 
+    /** Cause-chain depth searched for a mappable exception. */
+    private static final int MAX_CAUSE_DEPTH = 10;
+
     private final Logger log = LoggerFactory.getLogger(getClass());
 
-    @Value("${spring.application.name:unknown}")
-    private String serviceName;
+    private final String serviceName;
+    private final List<CcarErrorMapper> errorMappers;
+
+    public GlobalExceptionHandler(String serviceName, List<CcarErrorMapper> errorMappers) {
+        this.serviceName = serviceName;
+        this.errorMappers = List.copyOf(errorMappers);
+    }
 
     // ---------------------------------------------------------------------------------------------------
     // Application exceptions
@@ -71,9 +81,20 @@ public abstract class CcarExceptionHandler extends ResponseEntityExceptionHandle
         return respond(ex, ex.getErrorCode(), problem, headers);
     }
 
-    /** Last resort: anything not mapped elsewhere is a 500 with a generic, non-leaking detail. */
+    /**
+     * Everything without a more specific handler: first offered to the {@link CcarErrorMapper}s (the exception
+     * and its causes), otherwise a 500 with a generic, non-leaking detail.
+     */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Object> handleUnexpected(Exception ex, WebRequest request) {
+        CcarErrorMapper.MappedError mapped = map(ex);
+        if (mapped != null) {
+            HttpHeaders headers = new HttpHeaders();
+            if (mapped.retryAfterSeconds() != null) {
+                headers.set(HttpHeaders.RETRY_AFTER, String.valueOf(mapped.retryAfterSeconds()));
+            }
+            return respond(ex, mapped.code(), problem(mapped.code(), mapped.detail(), request), headers);
+        }
         return respond(ex, ErrorCode.INTERNAL_ERROR,
                 problem(ErrorCode.INTERNAL_ERROR, GENERIC_SERVER_ERROR, request), new HttpHeaders());
     }
@@ -141,8 +162,21 @@ public abstract class CcarExceptionHandler extends ResponseEntityExceptionHandle
         return ErrorCode.fromStatus(status.value());
     }
 
+    private CcarErrorMapper.MappedError map(Throwable ex) {
+        int depth = 0;
+        for (Throwable t = ex; t != null && depth < MAX_CAUSE_DEPTH; t = t.getCause(), depth++) {
+            for (CcarErrorMapper mapper : errorMappers) {
+                CcarErrorMapper.MappedError mapped = mapper.map(t);
+                if (mapped != null) {
+                    return mapped;
+                }
+            }
+        }
+        return null;
+    }
+
     // ---------------------------------------------------------------------------------------------------
-    // Helpers for subclasses
+    // Helpers (protected so a service could still extend this class if it ever needs to)
     // ---------------------------------------------------------------------------------------------------
 
     /** Builds a problem in the shared format for the current request. */

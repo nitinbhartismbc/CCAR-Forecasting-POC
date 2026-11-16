@@ -1,7 +1,6 @@
-package com.ccar.ccar_api_gateway.error;
+package com.ccar.common.reactive;
 
 import com.ccar.common.error.ErrorCode;
-import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
@@ -10,10 +9,17 @@ import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.util.concurrent.TimeoutException;
 
-/** Maps whatever went wrong while proxying a request to the shared error catalogue. */
-public final class GatewayErrorClassifier {
+/**
+ * Maps whatever went wrong while handling or proxying a reactive request to the shared error catalogue.
+ * <p>
+ * Resilience4j and Netty types are matched by class name, so ccar-common does not depend on either.
+ */
+public final class ReactiveErrorClassifier {
 
-    private GatewayErrorClassifier() {
+    private static final String CALL_NOT_PERMITTED = "io.github.resilience4j.circuitbreaker.CallNotPermittedException";
+    private static final String NETTY_TIMEOUT = "io.netty.handler.timeout.TimeoutException";
+
+    private ReactiveErrorClassifier() {
     }
 
     public static ErrorCode classify(Throwable error) {
@@ -28,12 +34,11 @@ public final class GatewayErrorClassifier {
     }
 
     private static ErrorCode classifyOne(Throwable t) {
-        if (t instanceof CallNotPermittedException) {
+        if (isA(t, CALL_NOT_PERMITTED)) {
             return ErrorCode.CIRCUIT_OPEN;
         }
         // response-timeout (TimeoutException / RSE 504), netty ReadTimeoutException, resilience4j time limiter
-        if (t instanceof TimeoutException || t instanceof SocketTimeoutException
-                || t instanceof io.netty.handler.timeout.TimeoutException) {
+        if (t instanceof TimeoutException || t instanceof SocketTimeoutException || isA(t, NETTY_TIMEOUT)) {
             return ErrorCode.DOWNSTREAM_TIMEOUT;
         }
         // connection refused / connect timeout (netty ConnectTimeoutException extends ConnectException)
@@ -67,5 +72,15 @@ public final class GatewayErrorClassifier {
             case INTERNAL_ERROR -> "An unexpected error occurred. Quote the correlationId when reporting this issue.";
             default -> code.title();
         };
+    }
+
+    /** {@code instanceof} by class name, walking the superclass chain. */
+    private static boolean isA(Throwable t, String className) {
+        for (Class<?> c = t.getClass(); c != null; c = c.getSuperclass()) {
+            if (c.getName().equals(className)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

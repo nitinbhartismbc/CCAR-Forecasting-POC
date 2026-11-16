@@ -1,1 +1,3 @@
 com.ccar.common.web.CcarWebAutoConfiguration
+com.ccar.common.reactive.CcarReactiveAutoConfiguration
+com.ccar.common.logging.CcarLoggingAutoConfiguration

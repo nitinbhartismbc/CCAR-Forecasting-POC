@@ -190,7 +190,8 @@ class GlobalExceptionHandlerWebMvcTest {
                 .andReturn();
 
         String echoed = result.getResponse().getHeader("X-Correlation-Id");
-        assertThat(echoed).isNotBlank().doesNotContain("bad");
+        // not just doesNotContain("bad"): a generated UUID can contain the hex sequence "bad"
+        assertThat(echoed).isNotBlank().doesNotContain("bad id").doesNotContain("\r").doesNotContain("\n");
         assertThat(result.getResponse().getContentAsString()).contains("\"correlationId\":\"" + echoed + "\"");
     }
 }

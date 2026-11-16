@@ -1,6 +1,6 @@
 package com.ccar.ccar_api_gateway.security;
 
-import com.ccar.ccar_api_gateway.error.ProblemResponseWriter;
+import com.ccar.common.reactive.ProblemResponseWriter;
 import com.ccar.ccar_api_gateway.logging.CorrelationIdWebFilter;
 import com.ccar.common.error.ErrorCode;
 import org.slf4j.Logger;
@@ -13,6 +13,8 @@ import org.springframework.http.HttpMethod;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
+
+import java.util.Map;
 
 /**
  * Rejects routed requests without a valid Bearer token with a 401 in the shared problem format and an
@@ -96,9 +98,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
     }
 
     private Mono<Void> reject(ServerWebExchange exchange, ErrorCode code, String detail, String wwwAuthenticate) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.set(HttpHeaders.WWW_AUTHENTICATE, wwwAuthenticate);
-        return problemWriter.write(exchange, code, detail, headers);
+        return problemWriter.write(exchange, code, detail, Map.of(HttpHeaders.WWW_AUTHENTICATE, wwwAuthenticate));
     }
 
     @Override

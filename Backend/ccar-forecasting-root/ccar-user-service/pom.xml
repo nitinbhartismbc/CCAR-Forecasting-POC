@@ -44,10 +44,16 @@
             <artifactId>spring-security-crypto</artifactId>
         </dependency>
 
-        <!-- Shared error catalogue, problem format and correlation-id filter -->
+        <!-- Shared error catalogue, problem format, correlation-id filter and AOP LoggingAspect -->
         <dependency>
             <groupId>com.ccar</groupId>
             <artifactId>ccar-common</artifactId>
+        </dependency>
+
+        <!-- Enables ccar-common's LoggingAspect (controller/service entry, exit and timing) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aspectj</artifactId>
         </dependency>
 
         <!-- @WebMvcTest slice (Spring Boot 4 split the MVC test support into its own starter) -->

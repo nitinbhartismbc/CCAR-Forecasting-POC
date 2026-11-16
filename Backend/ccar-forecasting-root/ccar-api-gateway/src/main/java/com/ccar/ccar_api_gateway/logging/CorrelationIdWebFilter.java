@@ -1,5 +1,6 @@
 package com.ccar.ccar_api_gateway.logging;
 
+import com.ccar.common.reactive.ReactiveCorrelation;
 import com.ccar.common.tracing.CorrelationId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,7 +33,8 @@ public class CorrelationIdWebFilter implements WebFilter, Ordered {
 
     private static final Logger log = LoggerFactory.getLogger(CorrelationIdWebFilter.class);
 
-    public static final String ORIGINAL_PATH_ATTRIBUTE = CorrelationIdWebFilter.class.getName() + ".originalPath";
+    /** Same key the shared reactive error handling (ccar-common) reads the client's path from. */
+    public static final String ORIGINAL_PATH_ATTRIBUTE = ReactiveCorrelation.ORIGINAL_PATH_ATTRIBUTE;
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
@@ -77,18 +79,11 @@ public class CorrelationIdWebFilter implements WebFilter, Ordered {
 
     /** The correlation id assigned to this exchange (generates one if the filter has not run, e.g. in tests). */
     public static String correlationId(ServerWebExchange exchange) {
-        Object attr = exchange.getAttribute(CorrelationId.ATTRIBUTE);
-        if (attr != null) {
-            return attr.toString();
-        }
-        String resolved = CorrelationId.resolve(exchange.getRequest().getHeaders().getFirst(CorrelationId.HEADER));
-        exchange.getAttributes().put(CorrelationId.ATTRIBUTE, resolved);
-        return resolved;
+        return ReactiveCorrelation.correlationId(exchange);
     }
 
     /** The path the client called, even after an internal forward. */
     public static String originalPath(ServerWebExchange exchange) {
-        Object attr = exchange.getAttribute(ORIGINAL_PATH_ATTRIBUTE);
-        return attr != null ? attr.toString() : exchange.getRequest().getPath().value();
+        return ReactiveCorrelation.originalPath(exchange);
     }
 }

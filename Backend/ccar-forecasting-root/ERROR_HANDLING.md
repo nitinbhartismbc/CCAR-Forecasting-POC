@@ -46,10 +46,20 @@ Never rename a released code.
 throw new CcarException(ErrorCode.BU_NOT_FOUND, "BU " + id + " not found").with("buId", id);
 ```
 
-Each servlet service has a `@RestControllerAdvice GlobalExceptionHandler extends CcarExceptionHandler`. The base
-class already handles `CcarException`, every Spring MVC exception (bad JSON, wrong parameter type, 405, 415,
-unknown path, ...) and a catch-all 500. Errors raised outside MVC, such as in a filter, are shaped the same way
-by `CcarErrorAttributes`.
+Exception handling lives once, in ccar-common, and is auto-configured into every service; no service declares
+its own handler.
+
+* **Servlet services** (ccar-hierarchy-service, ccar-user-service): `com.ccar.common.web.GlobalExceptionHandler`
+  handles `CcarException`, every Spring MVC exception (bad JSON, wrong parameter type, 405, 415, unknown path,
+  ...) and a catch-all 500. Before the 500 it offers the exception (and its causes) to the `CcarErrorMapper`
+  beans, registered only when their library is present: `KdbErrorMapper`, `PersistenceErrorMapper`,
+  `ConstraintViolationErrorMapper`. To map a new library exception, declare a `CcarErrorMapper` bean. Errors
+  raised outside MVC, such as in a filter, are shaped the same way by `CcarErrorAttributes`.
+* **api-gateway** (WebFlux): `com.ccar.common.reactive.ReactiveGlobalExceptionHandler` (order -2, before Boot's
+  default) classifies with `ReactiveErrorClassifier` and writes with `ProblemResponseWriter`, which the JWT
+  filter and the circuit-breaker fallback use too.
+
+`ccar.errors.retry-after-seconds` (default 30) sets `Retry-After` on 503s in every service.
 **Log once:** the handler logs 5xx at ERROR with the stack trace and 4xx as one WARN line. Don't
 catch-log-rethrow in services.
 

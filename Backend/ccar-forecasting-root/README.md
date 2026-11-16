@@ -37,7 +37,7 @@ error-handling and tracing library.
                                                       │  3 CircuitBreaker + Retry     │
                                                       │  4 route (timeouts)           │
                                                       │  on failure: Fallback /       │
-                                                      │  GatewayErrorWebExceptionHdlr │
+                                                      │  ReactiveGlobalExcHandler     │
                                                       └──────┬─────────────────┬──────┘
                                      /ccar/forecast/**       │                 │   /users, /users/**
                                      (35 s timeout)          ▼                 ▼   (10 s timeout)
@@ -45,8 +45,8 @@ error-handling and tracing library.
                               │ ccar-hierarchy-service :8081 │   │ ccar-user-service   :8082    │
                               │ CcarForecastController       │   │ UserController               │
                               │ BuHierarchyService (cache)   │   │ UserServiceImpl (BCrypt,JWT) │
-                              │ KdbService                   │   │ GlobalExceptionHandler       │
-                              │ GlobalExceptionHandler       │   └──────────────┬───────────────┘
+                              │ KdbService                   │   │ (ccar-common exc. handler)   │
+                              │ (ccar-common exc. handler)   │   └──────────────┬───────────────┘
                               │   └ kdb-client-starter       │                  │ JPA
                               │     (KdbTemplate + pool)     │                  ▼
                               └──────────────┬───────────────┘           ┌─────────────┐
@@ -57,7 +57,7 @@ error-handling and tracing library.
                                       └─────────────┘
 
   ccar-common (shared library, used by gateway, ccar-hierarchy-service and user-service):
-  ErrorCode catalogue · RFC 9457 problem+json · correlation-id filter · base exception handler
+  ErrorCode catalogue · RFC 9457 problem+json · correlation-id filter · GlobalExceptionHandler · AOP logging
 ```
 
 - Every production request enters through the **gateway on :8089**. It assigns or keeps the correlation id,
@@ -71,7 +71,7 @@ error-handling and tracing library.
 | Module | Artifact | Type | Port | Spring Boot | Java |
 |---|---|---|---|---|---|
 | (root) | `com.ccar:ccar-forecasting-parent:1.0.0` | Parent / aggregator POM | – | 4.1.2 | 21 |
-| [`ccar-common`](ccar-common) | `com.ccar:ccar-common:1.0.0` | Library (errors + tracing) | – | 4.1.2 (optional deps) | 17 |
+| [`ccar-common`](ccar-common) | `com.ccar:ccar-common:1.0.0` | Library (errors + tracing + logging) | – | 4.1.2 (optional deps) | 17 |
 | [`kdb-client-starter`](kdb-client-starter) | `com.iris.kdb:kdb-starter:1.0.0` | Library (Spring Boot starter) | – | 4.1.2 | 17 |
 | [`ccar-hierarchy-service`](ccar-hierarchy-service) | `com.example:ccar-hierarchy-service:0.0.1-SNAPSHOT` | Spring Boot application | 8081 | 4.1.2 | 21 |
 | [`ccar-user-service`](ccar-user-service) | `com.ccar:ccar-user-service:1.0.0` | Spring Boot application | 8082 | 4.1.2 | 21 |
@@ -85,16 +85,29 @@ Reactor build order: `ccar-common` → `kdb-client-starter` → `ccar-hierarchy-
 
 ### `ccar-common`
 
-Shared contract for errors and tracing.
+Shared contract for errors, tracing and logging.
 
 - `error/ErrorCode`: the catalogue of error codes (status + title) used by every service and the UI.
 - `error/ProblemDetailFactory`: builds the RFC 9457 problem body with `errorCode`, `correlationId`, `service`
   and `timestamp`.
 - `error/CcarException`: base exception for application errors (`new CcarException(ErrorCode.X, "detail")`).
 - `tracing/CorrelationId`: header name, MDC key and validation of incoming ids.
-- `web/` (servlet apps, auto-configured): `CorrelationIdFilter`, `CcarExceptionHandler` (base
-  `@RestControllerAdvice`), `CcarErrorAttributes` (same format for errors outside MVC), `MdcTaskDecorator`,
-  `CorrelationIdClientInterceptor`.
+- `web/` (servlet apps, auto-configured): `CorrelationIdFilter`, `GlobalExceptionHandler` (the one
+  `@RestControllerAdvice` of ccar-hierarchy-service and ccar-user-service; services declare none of their own),
+  `CcarErrorAttributes` (same format for errors outside MVC), `MdcTaskDecorator`,
+  `CorrelationIdClientInterceptor`. Store-specific mappings are `CcarErrorMapper` beans registered only when
+  the library is on the service's classpath: `KdbErrorMapper` (kdb-starter → 503/504/502),
+  `PersistenceErrorMapper` (Spring Data → 409/503), `ConstraintViolationErrorMapper` (Bean Validation → 400).
+  A service adds its own mapping by declaring a `CcarErrorMapper` bean.
+- `reactive/` (WebFlux apps, i.e. the gateway, auto-configured): `ReactiveGlobalExceptionHandler` (the
+  gateway's global error handler), `ProblemResponseWriter`, `ReactiveErrorClassifier`.
+- `logging/LoggingAspect` (all three services, auto-configured by `CcarLoggingAutoConfiguration`): entry/exit
+  timing for `@RestController`, `@Controller` and `@Service` beans under `com.ccar..` / `com.forecast..`.
+  INFO logs `<- method() completed in N ms`; DEBUG adds truncated args/results and failures (the exception
+  handlers log each failure once). `Mono`/`Flux` results (gateway) are timed until they terminate. Active
+  only when AspectJ is on the classpath (`spring-boot-starter-aspectj` on Boot 4, `spring-boot-starter-aop`
+  on Boot 3); `ccar.logging.enabled=false` turns it off, `ccar.logging.max-length` (default 500) sets the
+  truncation. The kdb-starter's `KdbLoggingAspect` stays separate.
 
 ### `kdb-client-starter`
 
@@ -123,8 +136,10 @@ Forecast data and the Business Unit (BU) hierarchy, read from KDB+. Port **8081*
 - `service/BuHierarchyService`: loads `BU_HIERARCHY` from KDB+ once, builds and caches the tree. While KDB+
   is down it answers 503 + `Retry-After` for `ccar.bu-hierarchy.retry-interval-ms` instead of retrying on
   every request; a failed reload keeps the previous tree.
-- `exception/GlobalExceptionHandler`: maps KDB failures to 503 / 504 / 502.
-- `logging/LoggingAspect`: method entry/exit timings (DEBUG shows args/results).
+- Errors: ccar-common's shared `GlobalExceptionHandler`; its `KdbErrorMapper` maps KDB failures to
+  503 / 504 / 502.
+- Controller/service entry/exit timings come from ccar-common's shared `LoggingAspect` (DEBUG shows
+  args/results).
 - `client/KdbClient`: standalone `main()` for testing KDB connectivity by hand.
 
 ### `ccar-user-service`
@@ -133,8 +148,9 @@ Registration, profiles and login; issues the JWT the gateway validates. Port **8
 
 - `UserController` / `UserServiceImpl`: CRUD on users, `POST /users/login` returns a JWT (HS512, 1 h).
 - Passwords are stored with BCrypt.
-- `exception/GlobalExceptionHandler`: 404 `USER_NOT_FOUND`, 409 `DUPLICATE_EMAIL`, 401
-  `INVALID_CREDENTIALS`, 400 validation (every field listed), 409/503 for database errors.
+- Errors: ccar-common's shared `GlobalExceptionHandler`: 404 `USER_NOT_FOUND`, 409 `DUPLICATE_EMAIL`, 401
+  `INVALID_CREDENTIALS`, 400 validation (every field listed), 409/503 for database errors
+  (`PersistenceErrorMapper`).
 
 ### `ccar-api-gateway`
 
@@ -147,7 +163,8 @@ Single entry point, built on Spring Cloud Gateway. Port **8089**.
   `WWW-Authenticate` header.
 - Routes with a Resilience4j circuit breaker each (`config/ResilienceConfig`), fallback to
   `error/FallbackController` (503 / 504). GETs to ccar-hierarchy-service are retried only when the connection is refused.
-- `error/GatewayErrorWebExceptionHandler`: unknown route 404, unexpected 500, all in the shared format.
+- Errors: ccar-common's shared `ReactiveGlobalExceptionHandler`: unknown route 404, downstream 503/504,
+  unexpected 500, all in the shared format.
 
 ## Ports at a glance
 
@@ -501,7 +518,7 @@ Full details: [ERROR_HANDLING.md](ERROR_HANDLING.md).
 | `ccar.gateway.services.user-service.response-timeout-ms` | `10000` | Response timeout for user-service |
 | `spring.cloud.gateway.httpclient.connect-timeout` | `2000` | Connect timeout (ms) |
 | `ccar.gateway.circuit-breaker.*` | 50 % / 20 calls / 30 s open / 40 s limit | Circuit breaker defaults |
-| `ccar.gateway.retry-after-seconds` | `30` | `Retry-After` on gateway 503s |
+| `ccar.errors.retry-after-seconds` | `30` | `Retry-After` on gateway 503s |
 | `ccar.security.jwt.secret` | (base64) | Must match user-service |
 
 **ccar-hierarchy-service**

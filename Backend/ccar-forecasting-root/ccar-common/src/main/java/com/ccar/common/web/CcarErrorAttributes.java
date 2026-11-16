@@ -32,7 +32,7 @@ public class CcarErrorAttributes extends DefaultErrorAttributes {
         body.put("type", code.type().toString());
         body.put("title", code.title());
         body.put("status", status);
-        body.put("detail", status >= 500 ? CcarExceptionHandler.GENERIC_SERVER_ERROR : code.title());
+        body.put("detail", status >= 500 ? GlobalExceptionHandler.GENERIC_SERVER_ERROR : code.title());
         body.put("instance", defaults.get("path"));
         body.put(ProblemDetailFactory.ERROR_CODE, code.name());
         body.put(ProblemDetailFactory.CORRELATION_ID, CorrelationIdFilter.current(webRequest));

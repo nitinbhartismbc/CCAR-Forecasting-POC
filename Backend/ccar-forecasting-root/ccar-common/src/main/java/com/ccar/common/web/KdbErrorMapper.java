@@ -1,43 +1,33 @@
-package com.forecast.ccar.exception;
+package com.ccar.common.web;
 
 import com.ccar.common.error.ErrorCode;
-import com.ccar.common.web.CcarExceptionHandler;
 import com.iris.kdb.exception.KdbConnectionException;
 import com.iris.kdb.exception.KdbException;
 import com.iris.kdb.exception.KdbPoolExhaustedException;
 import com.iris.kdb.exception.KdbQueryException;
 import com.iris.kdb.exception.KdbTimeoutException;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.ExceptionHandler;
-import org.springframework.web.bind.annotation.RestControllerAdvice;
-import org.springframework.web.context.request.WebRequest;
 
 /**
- * ccar-hierarchy-service error mapping. Generic, framework and {@code CcarException} handling is inherited from
- * {@link CcarExceptionHandler}; this class adds the KDB data-store failures.
+ * KDB data-store failures (kdb-starter), registered only when kdb-starter is on the classpath.
  * <p>
- * KDB exception messages (host, q error text) are logged, never returned: the client gets a generic detail
- * plus the correlation id to quote.
+ * KDB exception messages (host, q error text) are logged by the handler, never returned: the client gets a
+ * generic detail plus the correlation id to quote. 503s carry {@code Retry-After}.
  */
-@RestControllerAdvice
-public class GlobalExceptionHandler extends CcarExceptionHandler {
+public class KdbErrorMapper implements CcarErrorMapper {
 
     private final long retryAfterSeconds;
 
-    public GlobalExceptionHandler(@Value("${ccar.errors.retry-after-seconds:30}") long retryAfterSeconds) {
+    public KdbErrorMapper(long retryAfterSeconds) {
         this.retryAfterSeconds = retryAfterSeconds;
     }
 
-    @ExceptionHandler(KdbException.class)
-    public ResponseEntity<Object> handleKdb(KdbException ex, WebRequest request) {
-        ErrorCode code = classify(ex);
-        HttpHeaders headers = new HttpHeaders();
-        if (code.status() == 503) {
-            headers.set(HttpHeaders.RETRY_AFTER, String.valueOf(retryAfterSeconds));
+    @Override
+    public MappedError map(Throwable ex) {
+        if (!(ex instanceof KdbException kdb)) {
+            return null;
         }
-        return respond(ex, code, problem(code, detail(code), request), headers);
+        ErrorCode code = classify(kdb);
+        return new MappedError(code, detail(code), code.status() == 503 ? retryAfterSeconds : null);
     }
 
     static ErrorCode classify(KdbException ex) {

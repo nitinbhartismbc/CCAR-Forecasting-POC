@@ -15,7 +15,7 @@ import java.util.*;
  * Reads {@code forecast_ccar} through the pooled {@link KdbTemplate} (kdb-client-starter).
  * <p>
  * No try/catch-log-rethrow here: KDB failures surface as the starter's typed {@code KdbException}s and are
- * mapped to HTTP (503/504/502) and logged once by {@code GlobalExceptionHandler}.
+ * mapped to HTTP (503/504/502) and logged once by ccar-common's {@code GlobalExceptionHandler}.
  */
 @Service
 public class KdbService {

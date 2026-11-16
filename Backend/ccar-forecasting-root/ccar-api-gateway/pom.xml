@@ -48,6 +48,12 @@
 			<version>1.0.0</version>
 		</dependency>
 
+		<!-- Enables ccar-common's LoggingAspect (Boot 3 name of the AOP starter; Boot 4 renamed it to -aspectj) -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-aop</artifactId>
+		</dependency>
+
 		<!-- Test -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
