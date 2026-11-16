@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
 
 /**
- * ccar-core error mapping. Generic, framework and {@code CcarException} handling is inherited from
+ * ccar-hierarchy-service error mapping. Generic, framework and {@code CcarException} handling is inherited from
  * {@link CcarExceptionHandler}; this class adds the KDB data-store failures.
  * <p>
  * KDB exception messages (host, q error text) are logged, never returned: the client gets a generic detail

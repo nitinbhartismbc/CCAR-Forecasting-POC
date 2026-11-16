@@ -14,7 +14,7 @@
 /       q)pushTo[`:192.168.11.200:5173:test:test@123]
 /     The table is parsed locally and sent to the server as one IPC message.
 
-csvPath:`:ccar-core/src/main/resources/BU_HIERARCHY1.csv
+csvPath:`:ccar-hierarchy-service/src/main/resources/BU_HIERARCHY1.csv
 
 BU_HIERARCHY:("J*JJJJJJJJJJJ";enlist",") 0: csvPath
 

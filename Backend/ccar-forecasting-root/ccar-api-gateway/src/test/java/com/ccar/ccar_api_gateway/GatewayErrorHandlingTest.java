@@ -48,9 +48,9 @@ class GatewayErrorHandlingTest {
 
     @DynamicPropertySource
     static void routes(DynamicPropertyRegistry registry) {
-        registry.add("ccar.gateway.services.ccar-core.uri",
+        registry.add("ccar.gateway.services.ccar-hierarchy-service.uri",
                 () -> "http://localhost:" + DOWNSTREAM.getAddress().getPort());
-        registry.add("ccar.gateway.services.ccar-core.response-timeout-ms", () -> "1000");
+        registry.add("ccar.gateway.services.ccar-hierarchy-service.response-timeout-ms", () -> "1000");
         // nothing listens here -> connection refused
         registry.add("ccar.gateway.services.user-service.uri", () -> "http://localhost:" + DEAD_PORT);
     }

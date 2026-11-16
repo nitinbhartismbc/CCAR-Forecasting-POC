@@ -38,7 +38,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * One test per handler mapping of ccar-core: KDB failures, BU errors, framework errors and the catch-all all
+ * One test per handler mapping of ccar-hierarchy-service: KDB failures, BU errors, framework errors and the catch-all all
  * come back in the shared problem format with the request's correlation id.
  */
 @WebMvcTest(CcarForecastController.class)

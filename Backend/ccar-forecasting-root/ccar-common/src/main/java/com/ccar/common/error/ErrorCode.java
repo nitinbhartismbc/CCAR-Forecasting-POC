@@ -4,7 +4,7 @@ import java.net.URI;
 import java.util.Locale;
 
 /**
- * The single error-code catalogue shared by every CCAR service (gateway, ccar-core, user-service) and the UI.
+ * The single error-code catalogue shared by every CCAR service (gateway, ccar-hierarchy-service, user-service) and the UI.
  * <p>
  * The enum constant name is the stable, machine-readable {@code errorCode} sent to clients; the UI keys its
  * user-facing messages off it. Never rename a constant once released - add a new one instead.
@@ -36,12 +36,12 @@ public enum ErrorCode {
     USER_NOT_FOUND(404, "User not found"),
     DUPLICATE_EMAIL(409, "Email already registered"),
 
-    // ---- ccar-core: BU hierarchy ------------------------------------------------------------------------
+    // ---- ccar-hierarchy-service: BU hierarchy ------------------------------------------------------------------------
     BU_NOT_FOUND(404, "Business unit not found"),
     BU_HIERARCHY_UNAVAILABLE(503, "BU hierarchy unavailable"),
     BU_HIERARCHY_INVALID(500, "BU hierarchy data invalid"),
 
-    // ---- ccar-core: KDB data store ----------------------------------------------------------------------
+    // ---- ccar-hierarchy-service: KDB data store ----------------------------------------------------------------------
     KDB_UNAVAILABLE(503, "Data store unavailable"),
     KDB_POOL_EXHAUSTED(503, "Data store busy"),
     KDB_TIMEOUT(504, "Data store timeout"),

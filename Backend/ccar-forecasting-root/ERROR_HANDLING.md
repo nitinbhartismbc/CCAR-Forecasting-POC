@@ -1,6 +1,6 @@
 # Error handling & tracing
 
-All CCAR services (api-gateway, ccar-core, user-service) and the UI share one error contract and one
+All CCAR services (api-gateway, ccar-hierarchy-service, user-service) and the UI share one error contract and one
 correlation id. The shared code is in the `ccar-common` module.
 
 ## Error format (RFC 9457 `application/problem+json`)
@@ -55,7 +55,7 @@ catch-log-rethrow in services.
 
 ## KDB layer (`kdb-client-starter`)
 
-| Failure | Exception | HTTP (ccar-core) | Connection |
+| Failure | Exception | HTTP (ccar-hierarchy-service) | Connection |
 |---|---|---|---|
 | Pool max-wait exceeded | `KdbPoolExhaustedException` | 503 `KDB_POOL_EXHAUSTED` | - |
 | Cannot connect / login refused | `KdbConnectionException` | 503 `KDB_UNAVAILABLE` | - |
@@ -81,14 +81,14 @@ To trace a user-reported error, search all service logs for the `Reference` / `c
 
 ## Gateway resilience
 
-* Timeouts: connect 2 s. Per-route response timeout: ccar-core 35 s, user-service 10 s
+* Timeouts: connect 2 s. Per-route response timeout: ccar-hierarchy-service 35 s, user-service 10 s
   (`ccar.gateway.services.*`).
 * A circuit breaker per route sends failures to `/fallback/{service}`, which returns 503
   `DOWNSTREAM_UNAVAILABLE` / `CIRCUIT_OPEN` or 504 `DOWNSTREAM_TIMEOUT`.
-* Retry: GET on ccar-core only, and only on connection refused (the request never reached the service).
+* Retry: GET on ccar-hierarchy-service only, and only on connection refused (the request never reached the service).
 * 4xx/5xx responses from services are passed through unchanged; they already use this format.
 
 ## Build
 
-`ccar-common` is a reactor module. Build from this directory with `./ccar-core/mvnw install` (or `mvn install`).
+`ccar-common` is a reactor module. Build from this directory with `./ccar-hierarchy-service/mvnw install` (or `mvn install`).
 Building `ccar-api-gateway` on its own requires `ccar-common` to be installed in the local repository first.

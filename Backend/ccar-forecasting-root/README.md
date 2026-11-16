@@ -42,7 +42,7 @@ error-handling and tracing library.
                                      /ccar/forecast/**       │                 │   /users, /users/**
                                      (35 s timeout)          ▼                 ▼   (10 s timeout)
                               ┌──────────────────────────────┐   ┌──────────────────────────────┐
-                              │ ccar-core   :8081  /ccar     │   │ ccar-user-service   :8082    │
+                              │ ccar-hierarchy-service :8081 │   │ ccar-user-service   :8082    │
                               │ CcarForecastController       │   │ UserController               │
                               │ BuHierarchyService (cache)   │   │ UserServiceImpl (BCrypt,JWT) │
                               │ KdbService                   │   │ GlobalExceptionHandler       │
@@ -56,13 +56,13 @@ error-handling and tracing library.
                                       │ KDB+  :5173 │  forecast_ccar, BU_HIERARCHY
                                       └─────────────┘
 
-  ccar-common (shared library, used by gateway, ccar-core and user-service):
+  ccar-common (shared library, used by gateway, ccar-hierarchy-service and user-service):
   ErrorCode catalogue · RFC 9457 problem+json · correlation-id filter · base exception handler
 ```
 
 - Every production request enters through the **gateway on :8089**. It assigns or keeps the correlation id,
   validates the JWT (issued by user-service with the same HS512 secret) and routes to the service.
-- ccar-core reads KDB+ only through the pooled `KdbTemplate` from `kdb-client-starter`.
+- ccar-hierarchy-service reads KDB+ only through the pooled `KdbTemplate` from `kdb-client-starter`.
 - All services return errors in one format (`application/problem+json`) with an `errorCode` and the
   `correlationId`.
 
@@ -73,11 +73,11 @@ error-handling and tracing library.
 | (root) | `com.ccar:ccar-forecasting-parent:1.0.0` | Parent / aggregator POM | – | 4.1.2 | 21 |
 | [`ccar-common`](ccar-common) | `com.ccar:ccar-common:1.0.0` | Library (errors + tracing) | – | 4.1.2 (optional deps) | 17 |
 | [`kdb-client-starter`](kdb-client-starter) | `com.iris.kdb:kdb-starter:1.0.0` | Library (Spring Boot starter) | – | 4.1.2 | 17 |
-| [`ccar-core`](ccar-core) | `com.example:ccar-core:0.0.1-SNAPSHOT` | Spring Boot application | 8081 | 4.1.2 | 21 |
+| [`ccar-hierarchy-service`](ccar-hierarchy-service) | `com.example:ccar-hierarchy-service:0.0.1-SNAPSHOT` | Spring Boot application | 8081 | 4.1.2 | 21 |
 | [`ccar-user-service`](ccar-user-service) | `com.ccar:ccar-user-service:1.0.0` | Spring Boot application | 8082 | 4.1.2 | 21 |
 | [`ccar-api-gateway`](ccar-api-gateway) | `com.ccar:ccar-api-gateway:0.0.1-SNAPSHOT` | Spring Cloud Gateway application | 8089 | 3.4.5 | 21 |
 
-Reactor build order: `ccar-common` → `kdb-client-starter` → `ccar-core` → `ccar-user-service` → `ccar-api-gateway`.
+Reactor build order: `ccar-common` → `kdb-client-starter` → `ccar-hierarchy-service` → `ccar-user-service` → `ccar-api-gateway`.
 
 > `ccar-api-gateway` is a module of the root POM but uses `spring-boot-starter-parent` **3.4.5** with Spring
 > Cloud **2024.0.1**, because Spring Cloud Gateway 2024.0.x does not support Spring Boot 4.x. `ccar-common`
@@ -114,7 +114,7 @@ Reusable Spring Boot starter for KDB+ access, picked up by adding it as a depend
 
 See [`kdb-client-starter/README.md`](kdb-client-starter/README.md) for full usage.
 
-### `ccar-core`
+### `ccar-hierarchy-service`
 
 Forecast data and the Business Unit (BU) hierarchy, read from KDB+. Port **8081**, context path **`/ccar`**.
 
@@ -146,7 +146,7 @@ Single entry point, built on Spring Cloud Gateway. Port **8089**.
   `POST /users/login`. Returns 401 `UNAUTHORIZED`, `TOKEN_EXPIRED` or `TOKEN_INVALID` with a
   `WWW-Authenticate` header.
 - Routes with a Resilience4j circuit breaker each (`config/ResilienceConfig`), fallback to
-  `error/FallbackController` (503 / 504). GETs to ccar-core are retried only when the connection is refused.
+  `error/FallbackController` (503 / 504). GETs to ccar-hierarchy-service are retried only when the connection is refused.
 - `error/GatewayErrorWebExceptionHandler`: unknown route 404, unexpected 500, all in the shared format.
 
 ## Ports at a glance
@@ -154,15 +154,15 @@ Single entry point, built on Spring Cloud Gateway. Port **8089**.
 | Component | URL |
 |---|---|
 | API gateway (use this) | `http://localhost:8089` |
-| ccar-core (direct) | `http://localhost:8081/ccar` |
+| ccar-hierarchy-service (direct) | `http://localhost:8081/ccar` |
 | ccar-user-service (direct) | `http://localhost:8082` |
-| KDB+ | as configured in `ccar-core/src/main/resources/application.properties` (`kdb.host`, `kdb.port`) |
+| KDB+ | as configured in `ccar-hierarchy-service/src/main/resources/application.properties` (`kdb.host`, `kdb.port`) |
 | UI (Vite dev server) | `http://localhost:5173` |
 
 ## Prerequisites
 
 - Java 21 (the two libraries target 17)
-- Maven 3.8+, or the bundled wrapper `./ccar-core/mvnw`
+- Maven 3.8+, or the bundled wrapper `./ccar-hierarchy-service/mvnw`
 - A running KDB+ instance with the `forecast_ccar` and `BU_HIERARCHY` tables
 - `curl` (examples below use bash / Git Bash; PowerShell equivalents are given for the login step)
 
@@ -171,7 +171,7 @@ Single entry point, built on Spring Cloud Gateway. Port **8089**.
 From this directory:
 
 ```bash
-./ccar-core/mvnw clean install      # or: mvn clean install
+./ccar-hierarchy-service/mvnw clean install      # or: mvn clean install
 ```
 
 This builds all six modules and runs the test suite (unit tests, `@WebMvcTest` handler tests, simulated KDB
@@ -188,16 +188,16 @@ Start the components in this order, each in its own terminal.
 
 ```
 q -p 5173
-q)/ forecast_ccar: paste ccar-core/src/main/resources/KDB_Tables.txt
+q)/ forecast_ccar: paste ccar-hierarchy-service/src/main/resources/KDB_Tables.txt
 q)\l BU_HIERARCHY_LOAD.q          / BU_HIERARCHY from BU_HIERARCHY1.csv (see the header of the script)
 ```
 
 `BU_HIERARCHY_INSERT_100.q` loads only the first 100 rows, useful for a quick test.
 
-**2. ccar-core**
+**2. ccar-hierarchy-service**
 
 ```bash
-cd ccar-core && ./mvnw spring-boot:run
+cd ccar-hierarchy-service && ./mvnw spring-boot:run
 ```
 
 On startup it loads the BU hierarchy from KDB+ and logs `BU hierarchy loaded: N node(s) ...`. If KDB+ is not
@@ -206,7 +206,7 @@ reachable it logs the error and keeps running; hierarchy requests then return 50
 **3. ccar-user-service**
 
 ```bash
-cd ccar-user-service && ../ccar-core/mvnw spring-boot:run
+cd ccar-user-service && ../ccar-hierarchy-service/mvnw spring-boot:run
 ```
 
 **4. ccar-api-gateway**
@@ -221,7 +221,7 @@ cd ccar-api-gateway && ./mvnw spring-boot:run
 cd ../../ccar_ui && npm install && npm run dev
 ```
 
-Logs are written to `logs/ccar.log` (ccar-core), `logs/ccar-api-gateway.log` (gateway) and the console
+Logs are written to `logs/ccar.log` (ccar-hierarchy-service), `logs/ccar-api-gateway.log` (gateway) and the console
 (user-service). Every line carries the correlation id.
 
 ---
@@ -459,7 +459,7 @@ Request bodies:
 |---|---|---|
 | `GET` | `http://localhost:8081/ccar/kdb/health` | KDB connectivity and pool counts |
 | `GET` | `http://localhost:8081/ccar/kdb/metrics` | Host, active/idle connections, waiting threads, utilization % |
-| `GET` | `http://localhost:8081/ccar/swagger-ui.html` | OpenAPI / Swagger UI for ccar-core |
+| `GET` | `http://localhost:8081/ccar/swagger-ui.html` | OpenAPI / Swagger UI for ccar-hierarchy-service |
 Calling the services directly skips JWT validation. Use the gateway for anything other than local debugging.
 
 > `spring.h2.console.enabled=true` is set in user-service, but Spring Boot 4 serves `/h2-console` only when the
@@ -482,7 +482,7 @@ Calling the services directly skips JWT validation. Use the gateway for anything
   validation). Details never include queries, hosts, SQL or stack traces.
 - **Correlation id.** Send `X-Correlation-Id` (letters, digits, `.`, `_`, `:`, `-`, up to 128 chars) or let the
   gateway create one. It is forwarded to the service, written on every log line
-  (`[correlationId]` in ccar-core and user-service, `[id]` prefix in the gateway), returned in the response
+  (`[correlationId]` in ccar-hierarchy-service and user-service, `[id]` prefix in the gateway), returned in the response
   header and put in the error body.
 - **Logged once.** 5xx errors are logged at ERROR with the stack trace, 4xx as one WARN line, by the
   service's global exception handler.
@@ -495,8 +495,8 @@ Full details: [ERROR_HANDLING.md](ERROR_HANDLING.md).
 
 | Property | Default | Meaning |
 |---|---|---|
-| `ccar.gateway.services.ccar-core.uri` | `http://localhost:8081` | ccar-core base URL |
-| `ccar.gateway.services.ccar-core.response-timeout-ms` | `35000` | Response timeout for ccar-core |
+| `ccar.gateway.services.ccar-hierarchy-service.uri` | `http://localhost:8081` | ccar-hierarchy-service base URL |
+| `ccar.gateway.services.ccar-hierarchy-service.response-timeout-ms` | `35000` | Response timeout for ccar-hierarchy-service |
 | `ccar.gateway.services.user-service.uri` | `http://localhost:8082` | user-service base URL |
 | `ccar.gateway.services.user-service.response-timeout-ms` | `10000` | Response timeout for user-service |
 | `spring.cloud.gateway.httpclient.connect-timeout` | `2000` | Connect timeout (ms) |
@@ -504,7 +504,7 @@ Full details: [ERROR_HANDLING.md](ERROR_HANDLING.md).
 | `ccar.gateway.retry-after-seconds` | `30` | `Retry-After` on gateway 503s |
 | `ccar.security.jwt.secret` | (base64) | Must match user-service |
 
-**ccar-core**
+**ccar-hierarchy-service**
 
 | Property | Default | Meaning |
 |---|---|---|
@@ -528,7 +528,7 @@ Full details: [ERROR_HANDLING.md](ERROR_HANDLING.md).
 ## Known gaps
 
 - The UI now signs in and goes through the gateway (:8089), but its data calls use paths such as
-  `/ccar/bu/hierarchy` that are not routed by the gateway or implemented in ccar-core yet, so with
+  `/ccar/bu/hierarchy` that are not routed by the gateway or implemented in ccar-hierarchy-service yet, so with
   `VITE_USE_MOCK=false` those screens show "endpoint not found" after signing in.
 - Seeded users in `data.sql` cannot log in (SHA-256 hashes vs BCrypt); register new users instead.
 - H2 is in memory: users are lost when user-service restarts.

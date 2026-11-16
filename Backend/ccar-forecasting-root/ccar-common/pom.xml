@@ -21,7 +21,7 @@
 
     <!--
         Java 17 bytecode and ONLY optional dependencies: the module is consumed both by the Boot 4 servlet
-        services (ccar-core, ccar-user-service) and by the Boot 3 reactive ccar-api-gateway. Nothing here leaks
+        services (ccar-hierarchy-service, ccar-user-service) and by the Boot 3 reactive ccar-api-gateway. Nothing here leaks
         a Spring version onto a consumer's classpath; each consumer brings its own Spring.
           - com.ccar.common.error / com.ccar.common.tracing : plain Java + spring-web ProblemDetail (both stacks)
           - com.ccar.common.web                             : servlet only, auto-configured for Spring MVC apps

@@ -3,7 +3,7 @@
 //
 // Every call:
 //  - sends an X-Correlation-Id (one id per logical call, reused across retries) so the request can be traced
-//    through gateway -> ccar-core / user-service logs and quoted by the user from the error message;
+//    through gateway -> ccar-hierarchy-service / user-service logs and quoted by the user from the error message;
 //  - sends the JWT (if signed in) as a Bearer token;
 //  - times out after VITE_API_TIMEOUT_MS (default 30 s) and can be cancelled through an AbortSignal;
 //  - retries idempotent GETs on network errors and 502/503 (honouring Retry-After, capped), never on 4xx/504;

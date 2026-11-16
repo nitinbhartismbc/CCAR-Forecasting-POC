@@ -8,7 +8,7 @@
 ## Use it
 
 1. Postman → **Import** both files, then select the **CCAR Local** environment.
-2. Start KDB+, ccar-core, ccar-user-service and ccar-api-gateway (see the main README).
+2. Start KDB+, ccar-hierarchy-service, ccar-user-service and ccar-api-gateway (see the main README).
 3. Open the collection → **Run** → keep the folder order → **Run CCAR Forecasting API**.
 
 Command line (optional): `npx newman run CCAR-Forecasting.postman_collection.json -e CCAR-Local.postman_environment.json`
@@ -23,8 +23,8 @@ Command line (optional): `npx newman run CCAR-Forecasting.postman_collection.jso
 | 04 Correlation id / tracing | Caller id echoed, unsafe id replaced, id in error body |
 | 05 Negative - authentication | No token, non-Bearer, garbage, wrong signature, expired token, bad login, login validation |
 | 06 Negative - users | Duplicate email (create and update), validation, password under 8 characters, malformed JSON, 415, 404, 400, 405 |
-| 07 Negative - forecast & BU | Unknown BU, bad id/depth, 405, unknown path (ccar-core 404 vs gateway 404) |
-| 08 Resilience | KDB+ / ccar-core / user-service down → 503/504. **Tests are skipped while everything is healthy**; stop the dependency named in the request to exercise them |
+| 07 Negative - forecast & BU | Unknown BU, bad id/depth, 405, unknown path (ccar-hierarchy-service 404 vs gateway 404) |
+| 08 Resilience | KDB+ / ccar-hierarchy-service / user-service down → 503/504. **Tests are skipped while everything is healthy**; stop the dependency named in the request to exercise them |
 | 09 Direct service endpoints | `/kdb/health`, `/kdb/metrics` on :8081, and proof they are not exposed on the gateway |
 | 10 Cleanup | Delete the users created by the run, then confirm 404 / 401 |
 

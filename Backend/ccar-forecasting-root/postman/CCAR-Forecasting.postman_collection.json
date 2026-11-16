@@ -22,7 +22,7 @@
         "type": "text/javascript",
         "exec": [
           "// Every request carries a correlation id (unless the request sets its own), so each call can be found",
-          "// in the gateway, ccar-core and user-service logs. The id is kept in {{lastCorrelationId}}.",
+          "// in the gateway, ccar-hierarchy-service and user-service logs. The id is kept in {{lastCorrelationId}}.",
           "if (!pm.request.headers.has('X-Correlation-Id')) {",
           "    const id = 'pm-' + pm.variables.replaceIn('{{$guid}}');",
           "    pm.request.headers.upsert({ key: 'X-Correlation-Id', value: id });",
@@ -313,7 +313,7 @@
     },
     {
       "name": "03 Forecast & BU hierarchy - happy path",
-      "description": "Requires ccar-core running and KDB+ reachable with the forecast_ccar and BU_HIERARCHY tables loaded.",
+      "description": "Requires ccar-hierarchy-service running and KDB+ reachable with the forecast_ccar and BU_HIERARCHY tables loaded.",
       "item": [
         {
           "name": "Get forecast_ccar",
@@ -1595,7 +1595,7 @@
     },
     {
       "name": "07 Negative - forecast & BU hierarchy",
-      "description": "Not-found, bad parameters and HTTP-level errors on ccar-core.",
+      "description": "Not-found, bad parameters and HTTP-level errors on ccar-hierarchy-service.",
       "item": [
         {
           "name": "Unknown BU -> 404 BU_NOT_FOUND",
@@ -1868,7 +1868,7 @@
                   "    pm.response.to.have.status(404);",
                   "    pm.expect(pm.response.json().errorCode).to.eql(\"RESOURCE_NOT_FOUND\");",
                   "});",
-                  "pm.test('answered by ccar-core', () => pm.expect(pm.response.json().service).to.eql('ccar'));"
+                  "pm.test('answered by ccar-hierarchy-service', () => pm.expect(pm.response.json().service).to.eql('ccar'));"
                 ]
               }
             }
@@ -1914,7 +1914,7 @@
     },
     {
       "name": "08 Resilience - run with a dependency stopped",
-      "description": "These requests check failure handling when a dependency is down. With everything healthy their tests are SKIPPED, not failed. To exercise them: stop KDB+ (or point kdb.host at a dead host), stop ccar-core, or stop ccar-user-service, then run the matching request.",
+      "description": "These requests check failure handling when a dependency is down. With everything healthy their tests are SKIPPED, not failed. To exercise them: stop KDB+ (or point kdb.host at a dead host), stop ccar-hierarchy-service, or stop ccar-user-service, then run the matching request.",
       "item": [
         {
           "name": "KDB+ down: forecast-ccar -> 503 KDB_UNAVAILABLE",
@@ -1932,7 +1932,7 @@
                 "forecast-ccar"
               ]
             },
-            "description": "Stop KDB+ while ccar-core runs. Expected: 503 KDB_UNAVAILABLE with Retry-After: 30 (504 KDB_TIMEOUT if KDB+ hangs, 503 KDB_POOL_EXHAUSTED under load)."
+            "description": "Stop KDB+ while ccar-hierarchy-service runs. Expected: 503 KDB_UNAVAILABLE with Retry-After: 30 (504 KDB_TIMEOUT if KDB+ hangs, 503 KDB_POOL_EXHAUSTED under load)."
           },
           "event": [
             {
@@ -1977,7 +1977,7 @@
                 }
               ]
             },
-            "description": "Start ccar-core with KDB+ down. First call: 503 KDB_UNAVAILABLE; following calls within 30 s: 503 BU_HIERARCHY_UNAVAILABLE with Retry-After (fail fast, KDB+ not hit)."
+            "description": "Start ccar-hierarchy-service with KDB+ down. First call: 503 KDB_UNAVAILABLE; following calls within 30 s: 503 BU_HIERARCHY_UNAVAILABLE with Retry-After (fail fast, KDB+ not hit)."
           },
           "event": [
             {
@@ -2041,7 +2041,7 @@
           ]
         },
         {
-          "name": "ccar-core down -> 503 DOWNSTREAM_UNAVAILABLE",
+          "name": "ccar-hierarchy-service down -> 503 DOWNSTREAM_UNAVAILABLE",
           "request": {
             "method": "GET",
             "header": [],
@@ -2062,7 +2062,7 @@
                 }
               ]
             },
-            "description": "Stop ccar-core. The gateway retries the GET twice, then its circuit-breaker fallback answers 503. After repeated failures the circuit opens: 503 CIRCUIT_OPEN."
+            "description": "Stop ccar-hierarchy-service. The gateway retries the GET twice, then its circuit-breaker fallback answers 503. After repeated failures the circuit opens: 503 CIRCUIT_OPEN."
           },
           "event": [
             {
@@ -2140,7 +2140,7 @@
     },
     {
       "name": "09 Direct service endpoints (debug)",
-      "description": "Called on ccar-core directly ({{coreDirectUrl}}); the gateway does not route /ccar/kdb/**.",
+      "description": "Called on ccar-hierarchy-service directly ({{coreDirectUrl}}); the gateway does not route /ccar/kdb/**.",
       "item": [
         {
           "name": "KDB health",
