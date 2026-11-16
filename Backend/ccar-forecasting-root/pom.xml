@@ -40,6 +40,7 @@
         <module>kdb-client-starter</module>
         <module>ccar-hierarchy-service</module>
         <module>ccar-user-service</module>
+        <module>ccar-forecasting-service</module>
         <module>ccar-api-gateway</module>
     </modules>
 

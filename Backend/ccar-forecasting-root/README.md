@@ -75,9 +75,10 @@ error-handling and tracing library.
 | [`kdb-client-starter`](kdb-client-starter) | `com.iris.kdb:kdb-starter:1.0.0` | Library (Spring Boot starter) | – | 4.1.2 | 17 |
 | [`ccar-hierarchy-service`](ccar-hierarchy-service) | `com.example:ccar-hierarchy-service:0.0.1-SNAPSHOT` | Spring Boot application | 8081 | 4.1.2 | 21 |
 | [`ccar-user-service`](ccar-user-service) | `com.ccar:ccar-user-service:1.0.0` | Spring Boot application | 8082 | 4.1.2 | 21 |
+| [`ccar-forecasting-service`](ccar-forecasting-service) | `com.ccar:ccar-forecasting-service:1.0.0` | Spring Boot application | 8083 | 4.1.2 | 21 |
 | [`ccar-api-gateway`](ccar-api-gateway) | `com.ccar:ccar-api-gateway:0.0.1-SNAPSHOT` | Spring Cloud Gateway application | 8089 | 3.4.5 | 21 |
 
-Reactor build order: `ccar-common` → `kdb-client-starter` → `ccar-hierarchy-service` → `ccar-user-service` → `ccar-api-gateway`.
+Reactor build order: `kdb-client-starter` → `ccar-common` → `ccar-hierarchy-service` → `ccar-user-service` → `ccar-forecasting-service` → `ccar-api-gateway`.
 
 > `ccar-api-gateway` is a module of the root POM but uses `spring-boot-starter-parent` **3.4.5** with Spring
 > Cloud **2024.0.1**, because Spring Cloud Gateway 2024.0.x does not support Spring Boot 4.x. `ccar-common`
@@ -151,6 +152,19 @@ Registration, profiles and login; issues the JWT the gateway validates. Port **8
 - Errors: ccar-common's shared `GlobalExceptionHandler`: 404 `USER_NOT_FOUND`, 409 `DUPLICATE_EMAIL`, 401
   `INVALID_CREDENTIALS`, 400 validation (every field listed), 409/503 for database errors
   (`PersistenceErrorMapper`).
+
+### `ccar-forecasting-service`
+
+CCAR stress-scenario forecasts. Port **8083**. Starter structure; the store is in memory for now.
+
+- `controller/ForecastingController`: `GET /forecasts[?scenario=]`, `GET /forecasts/{id}`, `POST /forecasts`
+  (201 + `Location`), `DELETE /forecasts/{id}`.
+- `service/ForecastingService` / `ForecastingServiceImpl`: in-memory store (`ConcurrentHashMap`), to be replaced
+  by the real data source. Unknown ids throw `CcarException(RESOURCE_NOT_FOUND)`.
+- `model/Forecast` (record), `model/Scenario` (`BASELINE`, `ADVERSE`, `SEVERELY_ADVERSE`),
+  `dto/ForecastRequest` (validated).
+- Errors, correlation id and controller/service logging come from ccar-common; the service has no handler or
+  aspect of its own. Not routed through the gateway yet.
 
 ### `ccar-api-gateway`
 
