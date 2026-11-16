@@ -44,7 +44,7 @@ error-handling and tracing library.
                               ┌──────────────────────────────┐   ┌──────────────────────────────┐
                               │ ccar-hierarchy-service :8081 │   │ ccar-user-service   :8082    │
                               │ CcarForecastController       │   │ UserController               │
-                              │ BuHierarchyService (cache)   │   │ UserServiceImpl (BCrypt,JWT) │
+                              │ HierarchyService (BU,GEO,..) │   │ UserServiceImpl (BCrypt,JWT) │
                               │ KdbService                   │   │ (ccar-common exc. handler)   │
                               │ (ccar-common exc. handler)   │   └──────────────┬───────────────┘
                               │   └ kdb-client-starter       │                  │ JPA
@@ -53,7 +53,7 @@ error-handling and tracing library.
                                              │ q IPC (30 s read timeout) │ H2 (memory) │
                                              ▼                           └─────────────┘
                                       ┌─────────────┐
-                                      │ KDB+  :5173 │  forecast_ccar, BU_HIERARCHY
+                                      │ KDB+  :5173 │  forecast_ccar, BU_HIERARCHY, GEO_HIERARCHY
                                       └─────────────┘
 
   ccar-common (shared library, used by gateway, ccar-hierarchy-service and user-service):
@@ -132,11 +132,21 @@ See [`kdb-client-starter/README.md`](kdb-client-starter/README.md) for full usag
 
 Forecast data and the Business Unit (BU) hierarchy, read from KDB+. Port **8081**, context path **`/ccar`**.
 
-- `controller/CcarForecastController`: REST endpoints under `/forecast`.
+- `controller/CcarForecastController`: `GET /forecast/forecast-ccar`.
 - `service/KdbService`: runs `select from forecast_ccar` and returns it as JSON.
-- `service/BuHierarchyService`: loads `BU_HIERARCHY` from KDB+ once, builds and caches the tree. While KDB+
-  is down it answers 503 + `Retry-After` for `ccar.bu-hierarchy.retry-interval-ms` instead of retrying on
-  every request; a failed reload keeps the previous tree.
+- **Generic hierarchies** (BU, GEO and any future type), all served by the same code:
+  - `controller/HierarchyController`: `/forecast/hierarchy/{type}/…`, where `{type}` is `BU`, `GEO`, …
+    (case-insensitive).
+  - `service/HierarchyService`: one cached tree per type. Types under `ccar.hierarchy.types.*` are loaded at
+    startup. Any other type `XYZ` is served on its first request from the KDB table `XYZ_HIERARCHY`, if that
+    table exists (404 `HIERARCHY_NOT_FOUND` otherwise) - no code or config change needed.
+  - `service/HierarchyCache`: loads one hierarchy table once, builds and caches the tree. While KDB+ is down it
+    answers 503 + `Retry-After` for `ccar.hierarchy.retry-interval-ms` instead of retrying on every request; a
+    failed reload keeps the previous tree.
+  - `model/HierarchyDefinition`: table and column names of a type. Every hierarchy table has the same layout,
+    only the prefix differs: `<P>_ID, <P>_NAME, LEVEL_ID, <P>_ID_LEVEL1..n` (`BU_ID…`, `GEO_ID…`).
+  - `model/HierarchyNode` (tree node: `id, name, levelId, parentId, childCount, children`) and
+    `model/HierarchyInfo` (type status).
 - Errors: ccar-common's shared `GlobalExceptionHandler`; its `KdbErrorMapper` maps KDB failures to
   503 / 504 / 502.
 - Controller/service entry/exit timings come from ccar-common's shared `LoggingAspect` (DEBUG shows
@@ -194,7 +204,7 @@ Single entry point, built on Spring Cloud Gateway. Port **8089**.
 
 - Java 21 (the two libraries target 17)
 - Maven 3.8+, or the bundled wrapper `./ccar-hierarchy-service/mvnw`
-- A running KDB+ instance with the `forecast_ccar` and `BU_HIERARCHY` tables
+- A running KDB+ instance with the `forecast_ccar`, `BU_HIERARCHY` and `GEO_HIERARCHY` tables
 - `curl` (examples below use bash / Git Bash; PowerShell equivalents are given for the login step)
 
 ## Build and test
@@ -356,13 +366,17 @@ PowerShell: `Invoke-RestMethod http://localhost:8089/ccar/forecast/forecast-ccar
 }
 ```
 
-### Step 5 – Get the top of the BU hierarchy
+### Step 5 – Get the top of a hierarchy (BU, GEO, …)
 
 ```bash
-curl -s "http://localhost:8089/ccar/forecast/bu-hierarchy?depth=1" \
-  -H "Authorization: Bearer $TOKEN"
+# which hierarchies exist, and are they loaded?
+curl -s http://localhost:8089/ccar/forecast/hierarchy -H "Authorization: Bearer $TOKEN"
+
+curl -s "http://localhost:8089/ccar/forecast/hierarchy/BU?depth=1" -H "Authorization: Bearer $TOKEN"
+curl -s "http://localhost:8089/ccar/forecast/hierarchy/GEO?depth=1" -H "Authorization: Bearer $TOKEN"
 ```
 
+The `{type}` path segment selects the hierarchy; every endpoint below works the same for any type.
 `depth` limits how many levels below the root are returned (omit it for the whole tree).
 `childCount` is the real number of children, even when `children` is cut off by `depth`.
 
@@ -376,32 +390,32 @@ curl -s "http://localhost:8089/ccar/forecast/bu-hierarchy?depth=1" \
 }
 ```
 
-### Step 6 – Open one BU (node plus direct children)
+### Step 6 – Open one node (node plus direct children)
 
 ```bash
-curl -s "http://localhost:8089/ccar/forecast/bu-hierarchy/2?depth=1" \
+curl -s "http://localhost:8089/ccar/forecast/hierarchy/BU/2?depth=1" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-### Step 7 – Lazy-load the children of a BU (for expanding a tree node)
+### Step 7 – Lazy-load the children of a node (for expanding a tree node)
 
 ```bash
-curl -s http://localhost:8089/ccar/forecast/bu-hierarchy/2/children \
+curl -s http://localhost:8089/ccar/forecast/hierarchy/GEO/2/children \
   -H "Authorization: Bearer $TOKEN"
 ```
 
 Returns a JSON array of nodes without grandchildren. An unknown id returns `404` with
-`"errorCode": "BU_NOT_FOUND"`.
+`"errorCode": "HIERARCHY_NODE_NOT_FOUND"`; an unknown type returns `404 HIERARCHY_NOT_FOUND`.
 
-### Step 8 – Reload the BU hierarchy after the KDB table changed
+### Step 8 – Reload a hierarchy after its KDB table changed
 
 ```bash
-curl -s -X POST http://localhost:8089/ccar/forecast/bu-hierarchy/reload \
+curl -s -X POST http://localhost:8089/ccar/forecast/hierarchy/GEO/reload \
   -H "Authorization: Bearer $TOKEN"
 ```
 
 ```json
-{ "nodes": 1342, "loadedAt": "2026-11-11T10:42:07.118Z" }
+{ "type": "GEO", "table": "GEO_HIERARCHY", "loaded": true, "nodes": 2916, "loadedAt": "2026-11-11T10:42:07.118Z" }
 ```
 
 ### Step 9 – Manage users
@@ -426,10 +440,10 @@ curl -i -X DELETE http://localhost:8089/users/1 -H "Authorization: Bearer $TOKEN
 
 ```bash
 # no token -> 401 UNAUTHORIZED
-curl -i http://localhost:8089/ccar/forecast/bu-hierarchy
+curl -i http://localhost:8089/ccar/forecast/hierarchy/BU
 
-# unknown BU -> 404 BU_NOT_FOUND
-curl -s http://localhost:8089/ccar/forecast/bu-hierarchy/999999 -H "Authorization: Bearer $TOKEN"
+# unknown node -> 404 HIERARCHY_NODE_NOT_FOUND
+curl -s http://localhost:8089/ccar/forecast/hierarchy/BU/999999 -H "Authorization: Bearer $TOKEN"
 ```
 
 Example `401` body (`Content-Type: application/problem+json`, header `WWW-Authenticate: Bearer realm="ccar"`):
@@ -440,7 +454,7 @@ Example `401` body (`Content-Type: application/problem+json`, header `WWW-Authen
   "title": "Authentication required",
   "status": 401,
   "detail": "A Bearer access token is required.",
-  "instance": "/ccar/forecast/bu-hierarchy",
+  "instance": "/ccar/forecast/hierarchy/BU",
   "errorCode": "UNAUTHORIZED",
   "correlationId": "0b6f5a4e-2c1d-4b8e-9a43-7d2f1e6c9b10",
   "service": "ccar-api-gateway",
@@ -472,10 +486,11 @@ order. See [`postman/README.md`](postman/README.md).
 | `PUT` | `/users/{id}` | Bearer | Update a user | `200` user |
 | `DELETE` | `/users/{id}` | Bearer | Delete a user | `204` |
 | `GET` | `/ccar/forecast/forecast-ccar` | Bearer | `forecast_ccar` table as JSON | `200` |
-| `GET` | `/ccar/forecast/bu-hierarchy?depth={n}` | Bearer | BU tree from the root (`depth` optional, ≥ 0) | `200` node |
-| `GET` | `/ccar/forecast/bu-hierarchy/{buId}?depth={n}` | Bearer | Subtree of one BU (`depth` default 1) | `200` node |
-| `GET` | `/ccar/forecast/bu-hierarchy/{buId}/children` | Bearer | Direct children of one BU | `200` array |
-| `POST` | `/ccar/forecast/bu-hierarchy/reload` | Bearer | Reload the BU tree from KDB+ | `200 {nodes, loadedAt}` |
+| `GET` | `/ccar/forecast/hierarchy` | Bearer | Hierarchy types with table and load status | `200` array |
+| `GET` | `/ccar/forecast/hierarchy/{type}?depth={n}` | Bearer | Tree of `BU`, `GEO`, … from the root (`depth` optional, ≥ 0) | `200` node |
+| `GET` | `/ccar/forecast/hierarchy/{type}/{nodeId}?depth={n}` | Bearer | Subtree of one node (`depth` default 1) | `200` node |
+| `GET` | `/ccar/forecast/hierarchy/{type}/{nodeId}/children` | Bearer | Direct children of one node | `200` array |
+| `POST` | `/ccar/forecast/hierarchy/{type}/reload` | Bearer | Reload that hierarchy from KDB+ | `200 {type, table, loaded, nodes, loadedAt}` |
 
 Request bodies:
 
@@ -504,7 +519,7 @@ Calling the services directly skips JWT validation. Use the gateway for anything
 | any path | `404 ROUTE_NOT_FOUND` (gateway), `503 DOWNSTREAM_UNAVAILABLE`, `504 DOWNSTREAM_TIMEOUT`, `503 CIRCUIT_OPEN`, `500 INTERNAL_ERROR` |
 | `/users…` | `400 VALIDATION_FAILED` / `MALFORMED_REQUEST` / `INVALID_PARAMETER`, `401 INVALID_CREDENTIALS`, `404 USER_NOT_FOUND`, `409 DUPLICATE_EMAIL` / `CONFLICT`, `503 SERVICE_UNAVAILABLE` |
 | `/ccar/forecast/forecast-ccar` | `503 KDB_UNAVAILABLE` / `KDB_POOL_EXHAUSTED`, `504 KDB_TIMEOUT`, `502 KDB_QUERY_FAILED` |
-| `/ccar/forecast/bu-hierarchy…` | the KDB errors above, `400 INVALID_PARAMETER`, `404 BU_NOT_FOUND`, `503 BU_HIERARCHY_UNAVAILABLE`, `500 BU_HIERARCHY_INVALID` |
+| `/ccar/forecast/hierarchy…` | the KDB errors above, `400 INVALID_PARAMETER` (bad `type`, `depth` or id), `404 HIERARCHY_NOT_FOUND` (unknown type), `404 HIERARCHY_NODE_NOT_FOUND`, `503 HIERARCHY_UNAVAILABLE`, `500 HIERARCHY_INVALID` |
 
 ## Errors and tracing
 
@@ -543,8 +558,10 @@ Full details: [ERROR_HANDLING.md](ERROR_HANDLING.md).
 | `kdb.query-timeout-millis` | `30000` | Socket read timeout per query (→ 504 `KDB_TIMEOUT`) |
 | `kdb.max-wait-millis` | `5000` | Wait for a free pooled connection (→ 503 `KDB_POOL_EXHAUSTED`) |
 | `kdb.max-total` / `max-idle` / `min-idle` | `20` / `10` / `2` | Pool size |
-| `ccar.bu-hierarchy.table` | `BU_HIERARCHY` | KDB table for the BU tree |
-| `ccar.bu-hierarchy.retry-interval-ms` | `30000` | Fail-fast window after a failed hierarchy load |
+| `ccar.hierarchy.types.<TYPE>.table` | `<TYPE>_HIERARCHY` | KDB table of a hierarchy type (`BU` and `GEO` are configured) |
+| `ccar.hierarchy.types.<TYPE>.column-prefix` | `<TYPE>` | Column prefix: `<P>_ID`, `<P>_NAME`, `<P>_ID_LEVELn` |
+| `ccar.hierarchy.allow-unconfigured-types` | `true` | Serve other types from `<TYPE>_HIERARCHY` when that table exists |
+| `ccar.hierarchy.retry-interval-ms` | `30000` | Fail-fast window after a failed hierarchy load |
 | `ccar.errors.retry-after-seconds` | `30` | `Retry-After` on KDB 503s |
 | `kdb.logging.slow-query-threshold-ms` | `1000` | Slow-query WARN threshold |
 

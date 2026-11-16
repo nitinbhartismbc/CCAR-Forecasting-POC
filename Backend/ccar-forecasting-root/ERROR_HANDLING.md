@@ -32,7 +32,8 @@ correlation id. The shared code is in the `ccar-common` module.
 | Request | `VALIDATION_FAILED` 400, `MALFORMED_REQUEST` 400, `INVALID_PARAMETER` 400, `BAD_REQUEST` 400, `RESOURCE_NOT_FOUND` 404, `METHOD_NOT_ALLOWED` 405, `NOT_ACCEPTABLE` 406, `CONFLICT` 409, `UNSUPPORTED_MEDIA_TYPE` 415 |
 | Auth | `UNAUTHORIZED` 401, `TOKEN_INVALID` 401, `TOKEN_EXPIRED` 401, `INVALID_CREDENTIALS` 401, `FORBIDDEN` 403 |
 | Users | `USER_NOT_FOUND` 404, `DUPLICATE_EMAIL` 409 |
-| BU hierarchy | `BU_NOT_FOUND` 404, `BU_HIERARCHY_UNAVAILABLE` 503, `BU_HIERARCHY_INVALID` 500 |
+| Hierarchies (any type; body has `hierarchyType`) | `HIERARCHY_NOT_FOUND` 404, `HIERARCHY_NODE_NOT_FOUND` 404, `HIERARCHY_UNAVAILABLE` 503, `HIERARCHY_INVALID` 500 |
+| BU hierarchy (superseded, no longer sent) | `BU_NOT_FOUND` 404, `BU_HIERARCHY_UNAVAILABLE` 503, `BU_HIERARCHY_INVALID` 500 |
 | KDB | `KDB_UNAVAILABLE` 503, `KDB_POOL_EXHAUSTED` 503, `KDB_TIMEOUT` 504, `KDB_QUERY_FAILED` 502 |
 | Gateway | `ROUTE_NOT_FOUND` 404, `DOWNSTREAM_UNAVAILABLE` 503, `DOWNSTREAM_TIMEOUT` 504, `CIRCUIT_OPEN` 503 |
 | Generic | `SERVICE_UNAVAILABLE` 503, `INTERNAL_ERROR` 500 |
@@ -43,7 +44,7 @@ Never rename a released code.
 ## Throwing errors in a service
 
 ```java
-throw new CcarException(ErrorCode.BU_NOT_FOUND, "BU " + id + " not found").with("buId", id);
+throw new CcarException(ErrorCode.HIERARCHY_NODE_NOT_FOUND, "GEO node " + id + " not found").with("nodeId", id);
 ```
 
 Exception handling lives once, in ccar-common, and is auto-configured into every service; no service declares
@@ -73,8 +74,9 @@ catch-log-rethrow in services.
 | q error / unexpected result type | `KdbQueryException` | 502 `KDB_QUERY_FAILED` | kept |
 | I/O error mid-query | `KdbConnectionException` | 503 `KDB_UNAVAILABLE` | discarded |
 
-If the BU hierarchy fails to load, requests fail fast with `BU_HIERARCHY_UNAVAILABLE` and `Retry-After` for
-`ccar.bu-hierarchy.retry-interval-ms` instead of hitting KDB again.
+If a hierarchy (BU, GEO, ...) fails to load, its requests fail fast with `HIERARCHY_UNAVAILABLE` and
+`Retry-After` for `ccar.hierarchy.retry-interval-ms` instead of hitting KDB again. Each type backs off
+independently.
 
 ## Correlation id / tracing
 

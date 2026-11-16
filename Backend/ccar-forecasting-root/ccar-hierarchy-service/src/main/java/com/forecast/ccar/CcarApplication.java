@@ -1,10 +1,11 @@
 package com.forecast.ccar;
 
-import com.forecast.ccar.service.BuHierarchyService;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
 @SpringBootApplication
+@ConfigurationPropertiesScan
 public class CcarApplication {
 
 	public static void main(String[] args) throws Exception {

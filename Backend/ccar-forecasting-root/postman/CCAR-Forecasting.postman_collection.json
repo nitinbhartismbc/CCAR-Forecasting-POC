@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "fa0f7efc-7830-4149-9a52-4d7f65dca5c9",
     "name": "CCAR Forecasting API",
-    "description": "Happy-path and negative tests for the CCAR Forecasting POC through the API gateway.\n\n**Run order:** use the Collection Runner on the whole collection (folders 01-10 in order). Folder 01 registers a fresh user and stores the JWT; folder 10 deletes it again.\n\n**Environment:** import `CCAR-Local.postman_environment.json` and select it.\n\n**Every response** is also checked against the shared contract: `X-Correlation-Id` echoed, and every 4xx/5xx is RFC 9457 problem+json with `errorCode`, `correlationId` (equal to the header), `service` and `timestamp`.\n\n**Folder 03** needs KDB+ with the forecast_ccar and BU_HIERARCHY tables. **Folder 08** only runs its checks when a dependency is stopped; otherwise its tests are skipped.",
+    "description": "Happy-path and negative tests for the CCAR Forecasting POC through the API gateway.\n\n**Run order:** use the Collection Runner on the whole collection (folders 01-10 in order). Folder 01 registers a fresh user and stores the JWT; folder 10 deletes it again.\n\n**Environment:** import `CCAR-Local.postman_environment.json` and select it.\n\n**Every response** is also checked against the shared contract: `X-Correlation-Id` echoed, and every 4xx/5xx is RFC 9457 problem+json with `errorCode`, `correlationId` (equal to the header), `service` and `timestamp`.\n\n**Folder 03** needs KDB+ with the forecast_ccar, BU_HIERARCHY and GEO_HIERARCHY tables. **Folder 08** only runs its checks when a dependency is stopped; otherwise its tests are skipped.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -312,8 +312,8 @@
       ]
     },
     {
-      "name": "03 Forecast & BU hierarchy - happy path",
-      "description": "Requires ccar-hierarchy-service running and KDB+ reachable with the forecast_ccar and BU_HIERARCHY tables loaded.",
+      "name": "03 Forecast & hierarchies (BU, GEO) - happy path",
+      "description": "Requires ccar-hierarchy-service running and KDB+ reachable with the forecast_ccar, BU_HIERARCHY and GEO_HIERARCHY tables loaded.",
       "item": [
         {
           "name": "Get forecast_ccar",
@@ -348,19 +348,52 @@
           ]
         },
         {
-          "name": "Get BU hierarchy (depth=1)",
+          "name": "List hierarchy types",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy?depth=1",
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "ccar",
                 "forecast",
-                "bu-hierarchy"
+                "hierarchy"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const types = pm.response.json().map(h => h.type);",
+                  "pm.test('BU and GEO are configured', () => pm.expect(types).to.include.members(['BU', 'GEO']));",
+                  "pm.test('status shape', () => pm.expect(pm.response.json()[0]).to.include.keys('type', 'table', 'loaded', 'nodes', 'loadedAt'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get BU hierarchy (depth=1)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/BU?depth=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "hierarchy",
+                "BU"
               ],
               "query": [
                 {
@@ -393,19 +426,64 @@
           ]
         },
         {
-          "name": "Get full BU hierarchy",
+          "name": "Get GEO hierarchy (depth=1)",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy",
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/GEO?depth=1",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "ccar",
                 "forecast",
-                "bu-hierarchy"
+                "hierarchy",
+                "GEO"
+              ],
+              "query": [
+                {
+                  "key": "depth",
+                  "value": "1"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const root = pm.response.json();",
+                  "pm.test('root node shape', () => {",
+                  "    pm.expect(root).to.include.keys('id', 'name', 'levelId', 'parentId', 'childCount', 'children');",
+                  "    pm.expect(root.parentId).to.eql(null);",
+                  "});",
+                  "pm.test('depth=1 returns children without grandchildren', () => {",
+                  "    root.children.forEach(c => pm.expect(c.children).to.be.an('array').that.is.empty);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get full BU hierarchy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/BU",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "hierarchy",
+                "BU"
               ]
             },
             "description": "Returns the whole tree; can be large."
@@ -429,14 +507,15 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy/{{buId}}?depth=1",
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/BU/{{buId}}?depth=1",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "ccar",
                 "forecast",
-                "bu-hierarchy",
+                "hierarchy",
+                "BU",
                 "{{buId}}"
               ],
               "query": [
@@ -466,14 +545,15 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy/{{buId}}?depth=0",
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/BU/{{buId}}?depth=0",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "ccar",
                 "forecast",
-                "bu-hierarchy",
+                "hierarchy",
+                "BU",
                 "{{buId}}"
               ],
               "query": [
@@ -507,14 +587,15 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy/{{buId}}/children",
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/BU/{{buId}}/children",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "ccar",
                 "forecast",
-                "bu-hierarchy",
+                "hierarchy",
+                "BU",
                 "{{buId}}",
                 "children"
               ]
@@ -543,14 +624,15 @@
             "method": "POST",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy/reload",
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/BU/reload",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "ccar",
                 "forecast",
-                "bu-hierarchy",
+                "hierarchy",
+                "BU",
                 "reload"
               ]
             }
@@ -699,14 +781,15 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy?depth=1",
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/BU?depth=1",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "ccar",
                 "forecast",
-                "bu-hierarchy"
+                "hierarchy",
+                "BU"
               ],
               "query": [
                 {
@@ -1594,23 +1677,92 @@
       ]
     },
     {
-      "name": "07 Negative - forecast & BU hierarchy",
+      "name": "07 Negative - forecast & hierarchies",
       "description": "Not-found, bad parameters and HTTP-level errors on ccar-hierarchy-service.",
       "item": [
         {
-          "name": "Unknown BU -> 404 BU_NOT_FOUND",
+          "name": "Unknown hierarchy type -> 404 HIERARCHY_NOT_FOUND",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy/999999999",
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/NOSUCHTYPE",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "ccar",
                 "forecast",
-                "bu-hierarchy",
+                "hierarchy",
+                "NOSUCHTYPE"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 HIERARCHY_NOT_FOUND\", () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"HIERARCHY_NOT_FOUND\");",
+                  "});",
+                  "pm.test('hierarchyType in body', () => pm.expect(pm.response.json().hierarchyType).to.eql('NOSUCHTYPE'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Malformed hierarchy type -> 400 INVALID_PARAMETER",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/1BAD-TYPE",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "hierarchy",
+                "1BAD-TYPE"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 INVALID_PARAMETER\", () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"INVALID_PARAMETER\");",
+                  "    pm.expect(pm.response.json().parameter).to.eql('type');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unknown BU -> 404 HIERARCHY_NODE_NOT_FOUND",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/BU/999999999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "hierarchy",
+                "BU",
                 "999999999"
               ]
             }
@@ -1621,30 +1773,31 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"404 BU_NOT_FOUND\", () => {",
+                  "pm.test(\"404 HIERARCHY_NODE_NOT_FOUND\", () => {",
                   "    pm.response.to.have.status(404);",
-                  "    pm.expect(pm.response.json().errorCode).to.eql(\"BU_NOT_FOUND\");",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"HIERARCHY_NODE_NOT_FOUND\");",
                   "});",
-                  "pm.test('buId in body', () => pm.expect(pm.response.json().buId).to.eql(999999999));"
+                  "pm.test('nodeId in body', () => pm.expect(pm.response.json().nodeId).to.eql(999999999));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Children of unknown BU -> 404 BU_NOT_FOUND",
+          "name": "Children of unknown BU -> 404 HIERARCHY_NODE_NOT_FOUND",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy/999999999/children",
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/BU/999999999/children",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "ccar",
                 "forecast",
-                "bu-hierarchy",
+                "hierarchy",
+                "BU",
                 "999999999",
                 "children"
               ]
@@ -1656,9 +1809,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"404 BU_NOT_FOUND\", () => {",
+                  "pm.test(\"404 HIERARCHY_NODE_NOT_FOUND\", () => {",
                   "    pm.response.to.have.status(404);",
-                  "    pm.expect(pm.response.json().errorCode).to.eql(\"BU_NOT_FOUND\");",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"HIERARCHY_NODE_NOT_FOUND\");",
                   "});"
                 ]
               }
@@ -1671,14 +1824,15 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy/abc",
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/BU/abc",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "ccar",
                 "forecast",
-                "bu-hierarchy",
+                "hierarchy",
+                "BU",
                 "abc"
               ]
             }
@@ -1704,14 +1858,15 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy?depth=-1",
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/BU?depth=-1",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "ccar",
                 "forecast",
-                "bu-hierarchy"
+                "hierarchy",
+                "BU"
               ],
               "query": [
                 {
@@ -1743,14 +1898,15 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy?depth=two",
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/BU?depth=two",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "ccar",
                 "forecast",
-                "bu-hierarchy"
+                "hierarchy",
+                "BU"
               ],
               "query": [
                 {
@@ -1781,18 +1937,19 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy/reload",
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/BU/reload",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "ccar",
                 "forecast",
-                "bu-hierarchy",
+                "hierarchy",
+                "BU",
                 "reload"
               ]
             },
-            "description": "GET /bu-hierarchy/reload matches /bu-hierarchy/{buId}, and 'reload' is not a number."
+            "description": "GET /hierarchy/BU/reload matches /hierarchy/{type}/{nodeId}, and 'reload' is not a number."
           },
           "event": [
             {
@@ -1961,14 +2118,15 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy?depth=1",
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/BU?depth=1",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "ccar",
                 "forecast",
-                "bu-hierarchy"
+                "hierarchy",
+                "BU"
               ],
               "query": [
                 {
@@ -2006,18 +2164,19 @@
             "method": "POST",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy/reload",
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/BU/reload",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "ccar",
                 "forecast",
-                "bu-hierarchy",
+                "hierarchy",
+                "BU",
                 "reload"
               ]
             },
-            "description": "Stop KDB+ after a successful load. Reload fails with 503, but GET bu-hierarchy keeps returning the previously loaded tree."
+            "description": "Stop KDB+ after a successful load. Reload fails with 503, but GET hierarchy/BU keeps returning the previously loaded tree."
           },
           "event": [
             {
@@ -2046,14 +2205,15 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/ccar/forecast/bu-hierarchy?depth=1",
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/BU?depth=1",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "ccar",
                 "forecast",
-                "bu-hierarchy"
+                "hierarchy",
+                "BU"
               ],
               "query": [
                 {

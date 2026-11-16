@@ -36,7 +36,14 @@ public enum ErrorCode {
     USER_NOT_FOUND(404, "User not found"),
     DUPLICATE_EMAIL(409, "Email already registered"),
 
-    // ---- ccar-hierarchy-service: BU hierarchy ------------------------------------------------------------------------
+    // ---- ccar-hierarchy-service: any hierarchy type (BU, GEO, ...); the response carries "hierarchyType" ---------
+    HIERARCHY_NOT_FOUND(404, "Hierarchy not found"),
+    HIERARCHY_NODE_NOT_FOUND(404, "Hierarchy node not found"),
+    HIERARCHY_UNAVAILABLE(503, "Hierarchy unavailable"),
+    HIERARCHY_INVALID(500, "Hierarchy data invalid"),
+
+    // ---- ccar-hierarchy-service: BU hierarchy - superseded by HIERARCHY_* above and no longer sent; kept only
+    //      because released codes are never removed --------------------------------------------------------------
     BU_NOT_FOUND(404, "Business unit not found"),
     BU_HIERARCHY_UNAVAILABLE(503, "BU hierarchy unavailable"),
     BU_HIERARCHY_INVALID(500, "BU hierarchy data invalid"),

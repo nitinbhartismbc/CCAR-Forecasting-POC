@@ -34,7 +34,7 @@ Every response is also checked at collection level: `X-Correlation-Id` is return
 
 ## Notes
 
-- Folder 03 needs the `forecast_ccar` and `BU_HIERARCHY` tables in KDB+; without them those requests fail
+- Folder 03 needs the `forecast_ccar`, `BU_HIERARCHY` and `GEO_HIERARCHY` tables in KDB+; without them those requests fail
   with 503/502 (which is itself the correct error handling).
 - The expired / wrong-signature tokens are built in a pre-request script with `jwtSecret`. If you change
   `ccar.security.jwt.secret`, update the environment value too.

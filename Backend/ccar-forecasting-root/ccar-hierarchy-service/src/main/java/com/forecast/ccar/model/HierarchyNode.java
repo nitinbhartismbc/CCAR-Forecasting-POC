@@ -6,26 +6,27 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * One Business Unit in the BU hierarchy tree.
+ * One node of any hierarchy (BU, GEO, ...) - the generic, type-independent shape returned by every
+ * {@code /forecast/hierarchy/{type}} endpoint.
  * <p>
  * {@code childCount} is the real number of children even when {@code children} has been
  * truncated by a depth-limited view, so a UI tree can show an expand arrow and lazy-load
  * the children on demand.
  */
 @JsonPropertyOrder({"id", "name", "levelId", "parentId", "childCount", "children"})
-public class BuNode {
+public class HierarchyNode {
 
     private Long id;
     private String name;
     private Integer levelId;
     private Long parentId;
     private int childCount;
-    private List<BuNode> children = new ArrayList<>();
+    private List<HierarchyNode> children = new ArrayList<>();
 
-    public BuNode() {
+    public HierarchyNode(){
+
     }
-
-    public BuNode(Long id, String name, Integer levelId, Long parentId) {
+    public HierarchyNode(Long id, String name, Integer levelId, Long parentId) {
         this.id = id;
         this.name = name;
         this.levelId = levelId;
@@ -36,12 +37,12 @@ public class BuNode {
      * Returns a copy of this subtree containing at most {@code depth} levels below this node.
      * depth 0 = this node only (children empty, childCount preserved).
      */
-    public BuNode copy(int depth) {
-        BuNode copy = new BuNode(id, name, levelId, parentId);
+    public HierarchyNode copy(int depth) {
+        HierarchyNode copy = new HierarchyNode(id, name, levelId, parentId);
         copy.childCount = childCount;
         if (depth > 0) {
-            List<BuNode> copied = new ArrayList<>(children.size());
-            for (BuNode child : children) {
+            List<HierarchyNode> copied = new ArrayList<>(children.size());
+            for (HierarchyNode child : children) {
                 copied.add(child.copy(depth - 1));
             }
             copy.children = copied;
@@ -89,11 +90,11 @@ public class BuNode {
         this.childCount = childCount;
     }
 
-    public List<BuNode> getChildren() {
+    public List<HierarchyNode> getChildren() {
         return children;
     }
 
-    public void setChildren(List<BuNode> children) {
+    public void setChildren(List<HierarchyNode> children) {
         this.children = children;
     }
 }

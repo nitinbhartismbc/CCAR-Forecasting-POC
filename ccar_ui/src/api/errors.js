@@ -29,6 +29,12 @@ const MESSAGES = {
     INVALID_CREDENTIALS: "The email or password is incorrect.",
     DUPLICATE_EMAIL: "An account with this email already exists. Sign in instead.",
 
+    HIERARCHY_NOT_FOUND: "That hierarchy doesn’t exist.",
+    HIERARCHY_NODE_NOT_FOUND: "That entry doesn’t exist in the hierarchy.",
+    HIERARCHY_UNAVAILABLE: "The hierarchy isn’t available yet.",
+    HIERARCHY_INVALID: "The hierarchy data is invalid.",
+
+    // superseded by HIERARCHY_* (no longer sent by the backend)
     BU_NOT_FOUND: "That business unit doesn’t exist.",
     BU_HIERARCHY_UNAVAILABLE: "The business-unit hierarchy isn’t available yet.",
     BU_HIERARCHY_INVALID: "The business-unit hierarchy data is invalid.",
