@@ -45,12 +45,19 @@ class GatewayErrorHandlingTest {
     private static final HttpServer DOWNSTREAM = startDownstream();
     private static final int DEAD_PORT = freePort();
     private static final AtomicReference<String> RECEIVED_CORRELATION_ID = new AtomicReference<>();
+    /**
+     * Route response timeout. It applies to every call on the route, not only /slow, so it must leave room for the
+     * first (cold) proxied request - connection pool, class loading, circuit breaker - or that request flakes to 504.
+     */
+    private static final int ROUTE_TIMEOUT_MS = 3000;
+    /** How long /slow takes; well above the route timeout. */
+    private static final int SLOW_RESPONSE_MS = 10_000;
 
     @DynamicPropertySource
     static void routes(DynamicPropertyRegistry registry) {
         registry.add("ccar.gateway.services.ccar-hierarchy-service.uri",
                 () -> "http://localhost:" + DOWNSTREAM.getAddress().getPort());
-        registry.add("ccar.gateway.services.ccar-hierarchy-service.response-timeout-ms", () -> "1000");
+        registry.add("ccar.gateway.services.ccar-hierarchy-service.response-timeout-ms", () -> String.valueOf(ROUTE_TIMEOUT_MS));
         // nothing listens here -> connection refused
         registry.add("ccar.gateway.services.user-service.uri", () -> "http://localhost:" + DEAD_PORT);
     }
@@ -172,8 +179,10 @@ class GatewayErrorHandlingTest {
                 .jsonPath("$.instance").isEqualTo("/ccar/forecast/slow")
                 .jsonPath("$.correlationId").isNotEmpty();
 
-        // gave up after the 1 s route timeout, not after the 5 s the service takes
-        assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(4));
+        // gave up after the route timeout, not after the time the service takes
+        assertThat(Duration.ofNanos(System.nanoTime() - start))
+                .isGreaterThanOrEqualTo(Duration.ofMillis(ROUTE_TIMEOUT_MS))
+                .isLessThan(Duration.ofMillis(SLOW_RESPONSE_MS - 2000));
     }
 
     @Test
@@ -245,7 +254,7 @@ class GatewayErrorHandlingTest {
             });
             server.createContext("/ccar/forecast/slow", ex -> {
                 try {
-                    Thread.sleep(5000);
+                    Thread.sleep(SLOW_RESPONSE_MS);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }

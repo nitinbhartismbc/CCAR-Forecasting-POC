@@ -2,11 +2,9 @@ package com.forecast.ccar.exception;
 
 import com.ccar.common.error.CcarException;
 import com.ccar.common.error.ErrorCode;
-import com.forecast.ccar.controller.CcarForecastController;
 import com.forecast.ccar.controller.HierarchyController;
 import com.forecast.ccar.model.HierarchyNode;
 import com.forecast.ccar.service.HierarchyService;
-import com.forecast.ccar.service.KdbService;
 import com.iris.kdb.exception.KdbConnectionException;
 import com.iris.kdb.exception.KdbException;
 import com.iris.kdb.exception.KdbPoolExhaustedException;
@@ -45,16 +43,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * One test per handler mapping of ccar-hierarchy-service: KDB failures, BU errors, framework errors and the catch-all all
  * come back in the shared problem format with the request's correlation id.
  */
-@WebMvcTest({CcarForecastController.class, HierarchyController.class})
+@WebMvcTest({HierarchyController.class})
 class GlobalExceptionHandlerWebMvcTest {
 
     private static final String CID = "test-correlation-1";
 
     @Autowired
     private MockMvc mvc;
-
-    @MockitoBean
-    private KdbService kdbService;
 
     @MockitoBean
     private HierarchyService hierarchyService;
@@ -67,7 +62,7 @@ class GlobalExceptionHandlerWebMvcTest {
                         503, ErrorCode.KDB_POOL_EXHAUSTED, true),
                 Arguments.of(new KdbTimeoutException("KDB did not answer"),
                         504, ErrorCode.KDB_TIMEOUT, false),
-                Arguments.of(new KdbQueryException("KDB rejected the query: 'forecast_ccar"),
+                Arguments.of(new KdbQueryException("KDB rejected the query: 'BU_HIERARCHY"),
                         502, ErrorCode.KDB_QUERY_FAILED, false),
                 Arguments.of(new KdbException("Unexpected KDB client failure"),
                         503, ErrorCode.KDB_UNAVAILABLE, true));
@@ -77,20 +72,20 @@ class GlobalExceptionHandlerWebMvcTest {
     @MethodSource("kdbFailures")
     void kdbFailuresMapToStatusAndCode(KdbException failure, int status, ErrorCode code, boolean retryAfter)
             throws Exception {
-        when(kdbService.getForecastCcarJson()).thenThrow(failure);
+        when(hierarchyService.getHierarchy(anyString(), any())).thenThrow(failure);
 
-        MvcResult result = mvc.perform(get("/forecast/forecast-ccar").header("X-Correlation-Id", CID))
+        MvcResult result = mvc.perform(get("/forecast/hierarchy/BU").header("X-Correlation-Id", CID))
                 .andExpect(status().is(status))
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.errorCode").value(code.name()))
                 .andExpect(jsonPath("$.status").value(status))
                 .andExpect(jsonPath("$.type").value(code.type().toString()))
-                .andExpect(jsonPath("$.instance").value("/forecast/forecast-ccar"))
+                .andExpect(jsonPath("$.instance").value("/forecast/hierarchy/BU"))
                 .andExpect(jsonPath("$.correlationId").value(CID))
                 .andExpect(jsonPath("$.service").value("ccar"))
                 // internals (host, q error text) never reach the client
                 .andExpect(jsonPath("$.detail").value(not(containsString("192.168"))))
-                .andExpect(jsonPath("$.detail").value(not(containsString("forecast_ccar"))))
+                .andExpect(jsonPath("$.detail").value(not(containsString("BU_HIERARCHY"))))
                 .andExpect(header().string("X-Correlation-Id", CID))
                 .andReturn();
 
@@ -186,7 +181,7 @@ class GlobalExceptionHandlerWebMvcTest {
         mvc.perform(get("/forecast/hierarchy/BU/reload"))
                 .andExpect(status().isBadRequest()); // GET matches /{type}/{nodeId} -> "reload" is not a number
 
-        mvc.perform(post("/forecast/forecast-ccar"))
+        mvc.perform(post("/forecast/hierarchy/BU")) // /{type} is GET-only
                 .andExpect(status().isMethodNotAllowed())
                 .andExpect(jsonPath("$.errorCode").value("METHOD_NOT_ALLOWED"));
     }
@@ -200,9 +195,10 @@ class GlobalExceptionHandlerWebMvcTest {
 
     @Test
     void unexpectedException_is500WithoutLeakingInternals() throws Exception {
-        when(kdbService.getForecastCcarJson()).thenThrow(new NullPointerException("secret internal state"));
+        when(hierarchyService.getHierarchy(anyString(), any()))
+                .thenThrow(new NullPointerException("secret internal state"));
 
-        mvc.perform(get("/forecast/forecast-ccar"))
+        mvc.perform(get("/forecast/hierarchy/BU"))
                 .andExpect(status().isInternalServerError())
                 .andExpect(jsonPath("$.errorCode").value("INTERNAL_ERROR"))
                 .andExpect(jsonPath("$.detail").value(not(containsString("secret"))))

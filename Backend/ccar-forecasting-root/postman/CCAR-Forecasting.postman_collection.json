@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "fa0f7efc-7830-4149-9a52-4d7f65dca5c9",
     "name": "CCAR Forecasting API",
-    "description": "Happy-path and negative tests for the CCAR Forecasting POC through the API gateway.\n\n**Run order:** use the Collection Runner on the whole collection (folders 01-10 in order). Folder 01 registers a fresh user and stores the JWT; folder 10 deletes it again.\n\n**Environment:** import `CCAR-Local.postman_environment.json` and select it.\n\n**Every response** is also checked against the shared contract: `X-Correlation-Id` echoed, and every 4xx/5xx is RFC 9457 problem+json with `errorCode`, `correlationId` (equal to the header), `service` and `timestamp`.\n\n**Folder 03** needs KDB+ with the forecast_ccar, BU_HIERARCHY and GEO_HIERARCHY tables. **Folder 08** only runs its checks when a dependency is stopped; otherwise its tests are skipped.",
+    "description": "Happy-path and negative tests for the CCAR Forecasting POC through the API gateway.\n\n**Run order:** use the Collection Runner on the whole collection (folders 01-11 in order). Folder 01 registers a fresh user and stores the JWT; folder 11 deletes it again.\n\n**Environment:** import `CCAR-Local.postman_environment.json` and select it.\n\n**Every response** is also checked against the shared contract: `X-Correlation-Id` echoed, and every 4xx/5xx is RFC 9457 problem+json with `errorCode`, `correlationId` (equal to the header), `service` and `timestamp`.\n\n**Folder 03** needs KDB+ with the BU_HIERARCHY and GEO_HIERARCHY tables. **Folder 10** calls ccar-forecasting-service directly on {{forecastingDirectUrl}}. **Folder 08** only runs its checks when a dependency is stopped; otherwise its tests are skipped.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -88,6 +88,14 @@
     },
     {
       "key": "lastCorrelationId",
+      "value": ""
+    },
+    {
+      "key": "geoId",
+      "value": ""
+    },
+    {
+      "key": "forecastId",
       "value": ""
     }
   ],
@@ -312,41 +320,9 @@
       ]
     },
     {
-      "name": "03 Forecast & hierarchies (BU, GEO) - happy path",
-      "description": "Requires ccar-hierarchy-service running and KDB+ reachable with the forecast_ccar, BU_HIERARCHY and GEO_HIERARCHY tables loaded.",
+      "name": "03 Hierarchies (BU, GEO) - happy path",
+      "description": "Requires ccar-hierarchy-service running and KDB+ reachable with the BU_HIERARCHY and GEO_HIERARCHY tables loaded. Stores {{buId}} and {{geoId}} for the node/children requests.",
       "item": [
-        {
-          "name": "Get forecast_ccar",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/ccar/forecast/forecast-ccar",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "ccar",
-                "forecast",
-                "forecast-ccar"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
-                  "pm.test('wrapped in forecast_ccar.data', () => {",
-                  "    pm.expect(pm.response.json().forecast_ccar.data).to.be.an('array');",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
         {
           "name": "List hierarchy types",
           "request": {
@@ -463,7 +439,9 @@
                   "});",
                   "pm.test('depth=1 returns children without grandchildren', () => {",
                   "    root.children.forEach(c => pm.expect(c.children).to.be.an('array').that.is.empty);",
-                  "});"
+                  "});",
+                  "// first child of the GEO root (or the root itself) is used by the GEO node/children requests",
+                  "pm.collectionVariables.set('geoId', String((root.children[0] || root).id));"
                 ]
               }
             }
@@ -619,6 +597,121 @@
           ]
         },
         {
+          "name": "Get GEO node (depth=1)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/GEO/{{geoId}}?depth=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "hierarchy",
+                "GEO",
+                "{{geoId}}"
+              ],
+              "query": [
+                {
+                  "key": "depth",
+                  "value": "1"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test('returns the requested node', () => pm.expect(pm.response.json().id).to.eql(Number(pm.collectionVariables.get('geoId'))));",
+                  "pm.test('depth=1: children have no grandchildren', () => {",
+                  "    pm.response.json().children.forEach(c => pm.expect(c.children).to.be.an('array').that.is.empty);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get GEO children",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/GEO/{{geoId}}/children",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "hierarchy",
+                "GEO",
+                "{{geoId}}",
+                "children"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test('array of direct children', () => {",
+                  "    const kids = pm.response.json();",
+                  "    pm.expect(kids).to.be.an('array');",
+                  "    kids.forEach(k => pm.expect(k.parentId).to.eql(Number(pm.collectionVariables.get('geoId'))));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get geo hierarchy (lower-case type)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/geo?depth=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "hierarchy",
+                "geo"
+              ],
+              "query": [
+                {
+                  "key": "depth",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test('type is case-insensitive: same root as GEO', () => pm.expect(pm.response.json().parentId).to.eql(null));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Reload BU hierarchy",
           "request": {
             "method": "POST",
@@ -648,6 +741,45 @@
                   "    const r = pm.response.json();",
                   "    pm.expect(r.nodes).to.be.above(0);",
                   "    pm.expect(r.loadedAt).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reload GEO hierarchy",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/GEO/reload",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "hierarchy",
+                "GEO",
+                "reload"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test('GEO reloaded from GEO_HIERARCHY', () => {",
+                  "    const info = pm.response.json();",
+                  "    pm.expect(info.type).to.eql('GEO');",
+                  "    pm.expect(info.table).to.eql('GEO_HIERARCHY');",
+                  "    pm.expect(info.loaded).to.be.true;",
+                  "    pm.expect(info.nodes).to.be.above(0);",
+                  "    pm.expect(info.loadedAt).to.be.a('string');",
                   "});"
                 ]
               }
@@ -1677,7 +1809,7 @@
       ]
     },
     {
-      "name": "07 Negative - forecast & hierarchies",
+      "name": "07 Negative - hierarchies",
       "description": "Not-found, bad parameters and HTTP-level errors on ccar-hierarchy-service.",
       "item": [
         {
@@ -1812,6 +1944,44 @@
                   "pm.test(\"404 HIERARCHY_NODE_NOT_FOUND\", () => {",
                   "    pm.response.to.have.status(404);",
                   "    pm.expect(pm.response.json().errorCode).to.eql(\"HIERARCHY_NODE_NOT_FOUND\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unknown GEO node -> 404 HIERARCHY_NODE_NOT_FOUND",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/GEO/999999999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "hierarchy",
+                "GEO",
+                "999999999"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 HIERARCHY_NODE_NOT_FOUND\", () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"HIERARCHY_NODE_NOT_FOUND\");",
+                  "});",
+                  "pm.test('hierarchyType and nodeId in body', () => {",
+                  "    pm.expect(pm.response.json().hierarchyType).to.eql('GEO');",
+                  "    pm.expect(pm.response.json().nodeId).to.eql(999999999);",
                   "});"
                 ]
               }
@@ -1967,9 +2137,43 @@
           ]
         },
         {
-          "name": "POST forecast-ccar -> 405 METHOD_NOT_ALLOWED",
+          "name": "POST hierarchy type -> 405 METHOD_NOT_ALLOWED",
           "request": {
             "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/BU",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "forecast",
+                "hierarchy",
+                "BU"
+              ]
+            },
+            "description": "/{type} is GET-only; only /{type}/reload accepts POST."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"405 METHOD_NOT_ALLOWED\", () => {",
+                  "    pm.response.to.have.status(405);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"METHOD_NOT_ALLOWED\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Removed forecast-ccar endpoint -> 404 RESOURCE_NOT_FOUND",
+          "request": {
+            "method": "GET",
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/ccar/forecast/forecast-ccar",
@@ -1981,7 +2185,8 @@
                 "forecast",
                 "forecast-ccar"
               ]
-            }
+            },
+            "description": "GET /forecast/forecast-ccar (CcarForecastController + KdbService) was removed from ccar-hierarchy-service. The gateway still routes /ccar/forecast/**, so the service answers 404."
           },
           "event": [
             {
@@ -1989,9 +2194,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"405 METHOD_NOT_ALLOWED\", () => {",
-                  "    pm.response.to.have.status(405);",
-                  "    pm.expect(pm.response.json().errorCode).to.eql(\"METHOD_NOT_ALLOWED\");",
+                  "pm.test(\"404 RESOURCE_NOT_FOUND\", () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"RESOURCE_NOT_FOUND\");",
                   "});"
                 ]
               }
@@ -2071,47 +2276,8 @@
     },
     {
       "name": "08 Resilience - run with a dependency stopped",
-      "description": "These requests check failure handling when a dependency is down. With everything healthy their tests are SKIPPED, not failed. To exercise them: stop KDB+ (or point kdb.host at a dead host), stop ccar-hierarchy-service, or stop ccar-user-service, then run the matching request.",
+      "description": "These requests check failure handling when a dependency is down. With everything healthy their tests are SKIPPED, not failed. To exercise them: stop KDB+ (or point kdb.host at a dead host), stop ccar-hierarchy-service, or stop ccar-user-service, then run the matching request. Hierarchies are cached, so once loaded they keep serving while KDB+ is down; only a load or reload hits KDB+.",
       "item": [
-        {
-          "name": "KDB+ down: forecast-ccar -> 503 KDB_UNAVAILABLE",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/ccar/forecast/forecast-ccar",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "ccar",
-                "forecast",
-                "forecast-ccar"
-              ]
-            },
-            "description": "Stop KDB+ while ccar-hierarchy-service runs. Expected: 503 KDB_UNAVAILABLE with Retry-After: 30 (504 KDB_TIMEOUT if KDB+ hangs, 503 KDB_POOL_EXHAUSTED under load)."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.response.code < 500) {",
-                  "    pm.test.skip(\"dependency is healthy - stop it to exercise this scenario (see request description)\", () => {});",
-                  "} else {",
-                  "    pm.test(\"5xx with one of KDB_UNAVAILABLE, KDB_POOL_EXHAUSTED, KDB_TIMEOUT, KDB_QUERY_FAILED\", () => {",
-                  "        pm.expect([\"KDB_UNAVAILABLE\", \"KDB_POOL_EXHAUSTED\", \"KDB_TIMEOUT\", \"KDB_QUERY_FAILED\"]).to.include(pm.response.json().errorCode);",
-                  "    });",
-                  "    pm.test(\"Retry-After present on 503\", () => {",
-                  "        if (pm.response.code === 503) pm.expect(pm.response.headers.has(\"Retry-After\")).to.be.true;",
-                  "    });",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
         {
           "name": "KDB+ down at startup: BU hierarchy -> 503",
           "request": {
@@ -2405,7 +2571,333 @@
       ]
     },
     {
-      "name": "10 Cleanup",
+      "name": "10 Forecasting service - direct (:8083)",
+      "description": "ccar-forecasting-service called directly on {{forecastingDirectUrl}} (no gateway route yet). In-memory store, so data resets on restart. Stores {{forecastId}}.",
+      "auth": {
+        "type": "noauth"
+      },
+      "item": [
+        {
+          "name": "Create forecast -> 201",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{forecastingDirectUrl}}/forecasts",
+              "host": [
+                "{{forecastingDirectUrl}}"
+              ],
+              "path": [
+                "forecasts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"scenario\": \"ADVERSE\",\n  \"businessUnit\": \"BU_ALL\",\n  \"metric\": \"NET_INTEREST_INCOME\",\n  \"period\": \"2027-Q1\",\n  \"amount\": 1250000.5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "const f = pm.response.json();",
+                  "pm.test('forecast shape', () => {",
+                  "    pm.expect(f).to.include.keys('id', 'scenario', 'businessUnit', 'metric', 'period', 'amount', 'createdAt');",
+                  "    pm.expect(f.scenario).to.eql('ADVERSE');",
+                  "    pm.expect(f.period).to.eql('2027-Q1');",
+                  "});",
+                  "pm.test('Location header points at the new forecast', () => {",
+                  "    pm.expect(pm.response.headers.get('Location')).to.match(new RegExp('/forecasts/' + f.id + '$'));",
+                  "});",
+                  "pm.collectionVariables.set('forecastId', String(f.id));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List forecasts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{forecastingDirectUrl}}/forecasts",
+              "host": [
+                "{{forecastingDirectUrl}}"
+              ],
+              "path": [
+                "forecasts"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test('contains the created forecast', () => {",
+                  "    const ids = pm.response.json().map(f => f.id);",
+                  "    pm.expect(ids).to.include(Number(pm.collectionVariables.get('forecastId')));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List forecasts by scenario",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{forecastingDirectUrl}}/forecasts?scenario=ADVERSE",
+              "host": [
+                "{{forecastingDirectUrl}}"
+              ],
+              "path": [
+                "forecasts"
+              ],
+              "query": [
+                {
+                  "key": "scenario",
+                  "value": "ADVERSE"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test('only ADVERSE forecasts', () => pm.response.json().forEach(f => pm.expect(f.scenario).to.eql('ADVERSE')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get forecast by id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{forecastingDirectUrl}}/forecasts/{{forecastId}}",
+              "host": [
+                "{{forecastingDirectUrl}}"
+              ],
+              "path": [
+                "forecasts",
+                "{{forecastId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test('returns the requested forecast', () => pm.expect(pm.response.json().id).to.eql(Number(pm.collectionVariables.get('forecastId'))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create forecast invalid body -> 400 VALIDATION_FAILED",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{forecastingDirectUrl}}/forecasts",
+              "host": [
+                "{{forecastingDirectUrl}}"
+              ],
+              "path": [
+                "forecasts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"scenario\": \"ADVERSE\",\n  \"businessUnit\": \"\",\n  \"metric\": \"NET_INTEREST_INCOME\",\n  \"period\": \"2027-05\",\n  \"amount\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Blank businessUnit, period not like 2027-Q1, missing amount."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 VALIDATION_FAILED\", () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"VALIDATION_FAILED\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unknown scenario -> 400 INVALID_PARAMETER",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{forecastingDirectUrl}}/forecasts?scenario=MILD",
+              "host": [
+                "{{forecastingDirectUrl}}"
+              ],
+              "path": [
+                "forecasts"
+              ],
+              "query": [
+                {
+                  "key": "scenario",
+                  "value": "MILD"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 INVALID_PARAMETER\", () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"INVALID_PARAMETER\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get unknown forecast -> 404 RESOURCE_NOT_FOUND",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{forecastingDirectUrl}}/forecasts/999999999",
+              "host": [
+                "{{forecastingDirectUrl}}"
+              ],
+              "path": [
+                "forecasts",
+                "999999999"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 RESOURCE_NOT_FOUND\", () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"RESOURCE_NOT_FOUND\");",
+                  "});",
+                  "pm.test('forecastId in body', () => pm.expect(pm.response.json().forecastId).to.eql(999999999));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete forecast -> 204",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{forecastingDirectUrl}}/forecasts/{{forecastId}}",
+              "host": [
+                "{{forecastingDirectUrl}}"
+              ],
+              "path": [
+                "forecasts",
+                "{{forecastId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete forecast again -> 404 RESOURCE_NOT_FOUND",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{forecastingDirectUrl}}/forecasts/{{forecastId}}",
+              "host": [
+                "{{forecastingDirectUrl}}"
+              ],
+              "path": [
+                "forecasts",
+                "{{forecastId}}"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 RESOURCE_NOT_FOUND\", () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"RESOURCE_NOT_FOUND\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "11 Cleanup",
       "description": "Deletes the users created by this run and checks they are gone.",
       "item": [
         {
