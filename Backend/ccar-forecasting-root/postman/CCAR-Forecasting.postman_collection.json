@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "fa0f7efc-7830-4149-9a52-4d7f65dca5c9",
     "name": "CCAR Forecasting API",
-    "description": "Happy-path and negative tests for the CCAR Forecasting POC through the API gateway.\n\n**Run order:** use the Collection Runner on the whole collection (folders 01-11 in order). Folder 01 registers a fresh user and stores the JWT; folder 11 deletes it again.\n\n**Environment:** import `CCAR-Local.postman_environment.json` and select it.\n\n**Every response** is also checked against the shared contract: `X-Correlation-Id` echoed, and every 4xx/5xx is RFC 9457 problem+json with `errorCode`, `correlationId` (equal to the header), `service` and `timestamp`.\n\n**Folder 03** needs KDB+ with the BU_HIERARCHY and GEO_HIERARCHY tables. **Folder 10** calls ccar-forecasting-service directly on {{forecastingDirectUrl}}. **Folder 08** only runs its checks when a dependency is stopped; otherwise its tests are skipped.",
+    "description": "Happy-path and negative tests for the CCAR Forecasting POC through the API gateway.\n\n**Run order:** use the Collection Runner on the whole collection (folders 01-11 in order, including 10b). Folder 01 registers a fresh user and stores the JWT; folder 11 deletes it again.\n\n**Environment:** import `CCAR-Local.postman_environment.json` and select it.\n\n**Every response** is also checked against the shared contract: `X-Correlation-Id` echoed, and every 4xx/5xx is RFC 9457 problem+json with `errorCode`, `correlationId` (equal to the header), `service` and `timestamp`.\n\n**Folder 03** needs KDB+ with the BU_HIERARCHY and GEO_HIERARCHY tables. **Folders 10 and 10b** call ccar-forecasting-service (/ccar/v1) through the gateway and need the CCAR_FORECAST / CCAR_ACTUALS / CCAR_VARIANCE tables in KDB+. **Folder 08** only runs its checks when a dependency is stopped; otherwise its tests are skipped.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -95,7 +95,19 @@
       "value": ""
     },
     {
-      "key": "forecastId",
+      "key": "t0Date",
+      "value": ""
+    },
+    {
+      "key": "portfolioId",
+      "value": ""
+    },
+    {
+      "key": "v1RootBuId",
+      "value": ""
+    },
+    {
+      "key": "v1ChildBuId",
       "value": ""
     }
   ],
@@ -2413,6 +2425,102 @@
           ]
         },
         {
+          "name": "ccar-forecasting-service down -> 503 DOWNSTREAM_UNAVAILABLE",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/v1/portfolios",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "v1",
+                "portfolios"
+              ]
+            },
+            "description": "Stop ccar-forecasting-service. The gateway retries the GET twice, then its circuit-breaker fallback answers 503. After repeated failures the circuit opens: 503 CIRCUIT_OPEN."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code < 500) {",
+                  "    pm.test.skip(\"dependency is healthy - stop it to exercise this scenario (see request description)\", () => {});",
+                  "} else {",
+                  "    pm.test(\"5xx with one of DOWNSTREAM_UNAVAILABLE, CIRCUIT_OPEN\", () => {",
+                  "        pm.expect([\"DOWNSTREAM_UNAVAILABLE\", \"CIRCUIT_OPEN\"]).to.include(pm.response.json().errorCode);",
+                  "    });",
+                  "    pm.test(\"Retry-After present on 503\", () => {",
+                  "        if (pm.response.code === 503) pm.expect(pm.response.headers.has(\"Retry-After\")).to.be.true;",
+                  "    });",
+                  "}",
+                  "if (pm.response.code >= 500) pm.test('answered by the gateway', () => pm.expect(pm.response.json().service).to.eql('ccar-api-gateway'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "KDB+ down: forecast summary -> 503/504/502",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/v1/forecast/aggregate-summary?hierarchyType=BU&hierarchyId={{v1RootBuId}}&portfolioId=ALL&t0Date={{t0Date}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "v1",
+                "forecast",
+                "aggregate-summary"
+              ],
+              "query": [
+                {
+                  "key": "hierarchyType",
+                  "value": "BU"
+                },
+                {
+                  "key": "hierarchyId",
+                  "value": "{{v1RootBuId}}"
+                },
+                {
+                  "key": "portfolioId",
+                  "value": "ALL"
+                },
+                {
+                  "key": "t0Date",
+                  "value": "{{t0Date}}"
+                }
+              ]
+            },
+            "description": "Stop KDB+ (or drop CCAR_FORECAST). The hierarchy is cached, so the fact query is what fails."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code < 500) {",
+                  "    pm.test.skip(\"dependency is healthy - stop it to exercise this scenario (see request description)\", () => {});",
+                  "} else {",
+                  "    pm.test(\"5xx with a KDB_* error code\", () => {",
+                  "        pm.expect([\"KDB_UNAVAILABLE\", \"KDB_POOL_EXHAUSTED\", \"KDB_TIMEOUT\", \"KDB_QUERY_FAILED\"]).to.include(pm.response.json().errorCode);",
+                  "    });",
+                  "    pm.test('answered by ccar-forecasting-service', () => pm.expect(pm.response.json().service).to.eql('ccar-forecasting-service'));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "user-service down: login -> 503 DOWNSTREAM_UNAVAILABLE",
           "request": {
             "method": "POST",
@@ -2567,79 +2675,58 @@
               }
             }
           ]
+        },
+        {
+          "name": "KDB health (ccar-forecasting-service)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{forecastingDirectUrl}}/kdb/health",
+              "host": [
+                "{{forecastingDirectUrl}}"
+              ],
+              "path": [
+                "kdb",
+                "health"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
     {
-      "name": "10 Forecasting service - direct (:8083)",
-      "description": "ccar-forecasting-service called directly on {{forecastingDirectUrl}} (no gateway route yet). In-memory store, so data resets on restart. Stores {{forecastId}}.",
-      "auth": {
-        "type": "noauth"
-      },
+      "name": "10 Forecasting data (/ccar/v1) - happy path",
+      "description": "ccar-forecasting-service through the gateway (route /ccar/v1/**). Needs KDB+ with BU_HIERARCHY, GEO_HIERARCHY and the CCAR_FORECAST / CCAR_ACTUALS / CCAR_VARIANCE tables (CCAR_FACT_TABLES_LOAD.q). Stores {{t0Date}}, {{portfolioId}}, {{v1RootBuId}}, {{v1ChildBuId}}.",
       "item": [
         {
-          "name": "Create forecast -> 201",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{forecastingDirectUrl}}/forecasts",
-              "host": [
-                "{{forecastingDirectUrl}}"
-              ],
-              "path": [
-                "forecasts"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"scenario\": \"ADVERSE\",\n  \"businessUnit\": \"BU_ALL\",\n  \"metric\": \"NET_INTEREST_INCOME\",\n  \"period\": \"2027-Q1\",\n  \"amount\": 1250000.5\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
-                  "const f = pm.response.json();",
-                  "pm.test('forecast shape', () => {",
-                  "    pm.expect(f).to.include.keys('id', 'scenario', 'businessUnit', 'metric', 'period', 'amount', 'createdAt');",
-                  "    pm.expect(f.scenario).to.eql('ADVERSE');",
-                  "    pm.expect(f.period).to.eql('2027-Q1');",
-                  "});",
-                  "pm.test('Location header points at the new forecast', () => {",
-                  "    pm.expect(pm.response.headers.get('Location')).to.match(new RegExp('/forecasts/' + f.id + '$'));",
-                  "});",
-                  "pm.collectionVariables.set('forecastId', String(f.id));"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "List forecasts",
+          "name": "Portfolios",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{forecastingDirectUrl}}/forecasts",
+              "raw": "{{baseUrl}}/ccar/v1/portfolios",
               "host": [
-                "{{forecastingDirectUrl}}"
+                "{{baseUrl}}"
               ],
               "path": [
-                "forecasts"
+                "ccar",
+                "v1",
+                "portfolios"
               ]
             }
           },
@@ -2650,9 +2737,163 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
-                  "pm.test('contains the created forecast', () => {",
-                  "    const ids = pm.response.json().map(f => f.id);",
-                  "    pm.expect(ids).to.include(Number(pm.collectionVariables.get('forecastId')));",
+                  "const p = pm.response.json();",
+                  "pm.test('ALL first, every item {id, name}', () => {",
+                  "    pm.expect(p[0]).to.eql({ id: 'ALL', name: 'All Portfolios' });",
+                  "    p.forEach(x => pm.expect(x).to.have.keys('id', 'name'));",
+                  "});",
+                  "pm.collectionVariables.set('portfolioId', p.length > 1 ? p[1].id : 'ALL');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "T0 dates",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/v1/t0-dates",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "v1",
+                "t0-dates"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json();",
+                  "pm.test('ISO dates, latest first, at least one', () => {",
+                  "    pm.expect(d.length, 'no T0 dates - load CCAR_FACT_TABLES_LOAD.q').to.be.above(0);",
+                  "    d.forEach(x => pm.expect(x).to.match(/^\\d{4}-\\d{2}-\\d{2}$/));",
+                  "    pm.expect([...d].sort().reverse()).to.eql(d);",
+                  "});",
+                  "if (d.length) pm.collectionVariables.set('t0Date', d[0]);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "BU hierarchy (flat, from root)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/v1/hierarchy/root/BU",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "v1",
+                "hierarchy",
+                "root",
+                "BU"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const n = pm.response.json();",
+                  "pm.test('flat list: root first, every node has the UI fields', () => {",
+                  "    pm.expect(n.length).to.be.above(0);",
+                  "    pm.expect(n[0].parentId).to.be.null;",
+                  "    pm.expect(n[0].level).to.eql(1);",
+                  "    n.forEach(x => pm.expect(x).to.have.keys('id', 'name', 'level', 'parentId', 'childCount', 'isLeafNode'));",
+                  "});",
+                  "pm.test('isLeafNode == (childCount == 0)', () => n.forEach(x => pm.expect(x.isLeafNode).to.eql(x.childCount === 0)));",
+                  "pm.test('childCount matches the parentIds in the list', () => {",
+                  "    const counts = {};",
+                  "    n.forEach(x => { if (x.parentId !== null) counts[x.parentId] = (counts[x.parentId] || 0) + 1; });",
+                  "    pm.expect(n[0].childCount).to.eql(counts[n[0].id] || 0);",
+                  "});",
+                  "pm.collectionVariables.set('v1RootBuId', n[0].id);",
+                  "const child = n.find(x => x.parentId === n[0].id);",
+                  "if (child) pm.collectionVariables.set('v1ChildBuId', child.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GEO hierarchy (flat, from root)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/v1/hierarchy/root/GEO",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "v1",
+                "hierarchy",
+                "root",
+                "GEO"
+              ]
+            },
+            "description": "Needs the GEO_HIERARCHY table in KDB+."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test('root first', () => pm.expect(pm.response.json()[0].parentId).to.be.null);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reload BU hierarchy",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/v1/hierarchy/BU/reload",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "v1",
+                "hierarchy",
+                "BU",
+                "reload"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test('type and node count', () => {",
+                  "    const r = pm.response.json();",
+                  "    pm.expect(r.type).to.eql('BU');",
+                  "    pm.expect(r.nodes).to.be.above(0);",
                   "});"
                 ]
               }
@@ -2660,22 +2901,37 @@
           ]
         },
         {
-          "name": "List forecasts by scenario",
+          "name": "Forecast aggregate summary",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{forecastingDirectUrl}}/forecasts?scenario=ADVERSE",
+              "raw": "{{baseUrl}}/ccar/v1/forecast/aggregate-summary?hierarchyType=BU&hierarchyId={{v1RootBuId}}&portfolioId=ALL&t0Date={{t0Date}}",
               "host": [
-                "{{forecastingDirectUrl}}"
+                "{{baseUrl}}"
               ],
               "path": [
-                "forecasts"
+                "ccar",
+                "v1",
+                "forecast",
+                "aggregate-summary"
               ],
               "query": [
                 {
-                  "key": "scenario",
-                  "value": "ADVERSE"
+                  "key": "hierarchyType",
+                  "value": "BU"
+                },
+                {
+                  "key": "hierarchyId",
+                  "value": "{{v1RootBuId}}"
+                },
+                {
+                  "key": "portfolioId",
+                  "value": "ALL"
+                },
+                {
+                  "key": "t0Date",
+                  "value": "{{t0Date}}"
                 }
               ]
             }
@@ -2687,25 +2943,68 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
-                  "pm.test('only ADVERSE forecasts', () => pm.response.json().forEach(f => pm.expect(f.scenario).to.eql('ADVERSE')));"
+                  "const s = pm.response.json();",
+                  "pm.test('scope is the requested node', () => {",
+                  "    pm.expect(s.scope).to.include({ type: 'BU', id: Number(pm.collectionVariables.get('v1RootBuId')) });",
+                  "    pm.expect(s.scope).to.have.keys('type', 'id', 'name', 'level');",
+                  "});",
+                  "pm.test('echoes t0Date, portfolio and currency', () => {",
+                  "    pm.expect(s.t0Date).to.eql(pm.collectionVariables.get('t0Date'));",
+                  "    pm.expect(s.portfolioId).to.eql('ALL');",
+                  "    pm.expect(s.currency).to.eql('USD');",
+                  "});",
+                  "pm.test('periods are T0, T+1 .. T+36', () => {",
+                  "    pm.expect(s.periods).to.have.lengthOf(37);",
+                  "    pm.expect(s.periods[0]).to.eql('T0');",
+                  "    pm.expect(s.periods[1]).to.eql('T+1');",
+                  "    pm.expect(s.periods[36]).to.eql('T+36');",
+                  "});",
+                  "pm.test('period_values: Balance, Revenue, Expense first, one value (or null) per period', () => {",
+                  "    pm.expect(s.period_values.slice(0, 3).map(r => r.accountId)).to.eql(['210001', '400001', '500001']);",
+                  "    pm.expect(s.period_values.slice(0, 3).map(r => r.measure)).to.eql(['Balance', 'Revenue', 'Expense']);",
+                  "    s.period_values.forEach(r => {",
+                  "        pm.expect(r.values).to.have.lengthOf(s.periods.length);",
+                  "        r.values.forEach(v => pm.expect(v === null || typeof v === 'number').to.be.true);",
+                  "    });",
+                  "});"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Get forecast by id",
+          "name": "Actuals aggregate summary",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{forecastingDirectUrl}}/forecasts/{{forecastId}}",
+              "raw": "{{baseUrl}}/ccar/v1/actuals/aggregate-summary?hierarchyType=BU&hierarchyId={{v1RootBuId}}&portfolioId=ALL&t0Date={{t0Date}}",
               "host": [
-                "{{forecastingDirectUrl}}"
+                "{{baseUrl}}"
               ],
               "path": [
-                "forecasts",
-                "{{forecastId}}"
+                "ccar",
+                "v1",
+                "actuals",
+                "aggregate-summary"
+              ],
+              "query": [
+                {
+                  "key": "hierarchyType",
+                  "value": "BU"
+                },
+                {
+                  "key": "hierarchyId",
+                  "value": "{{v1RootBuId}}"
+                },
+                {
+                  "key": "portfolioId",
+                  "value": "ALL"
+                },
+                {
+                  "key": "t0Date",
+                  "value": "{{t0Date}}"
+                }
               ]
             }
           },
@@ -2716,41 +3015,71 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
-                  "pm.test('returns the requested forecast', () => pm.expect(pm.response.json().id).to.eql(Number(pm.collectionVariables.get('forecastId'))));"
+                  "const s = pm.response.json();",
+                  "pm.test('scope is the requested node', () => {",
+                  "    pm.expect(s.scope).to.include({ type: 'BU', id: Number(pm.collectionVariables.get('v1RootBuId')) });",
+                  "    pm.expect(s.scope).to.have.keys('type', 'id', 'name', 'level');",
+                  "});",
+                  "pm.test('echoes t0Date, portfolio and currency', () => {",
+                  "    pm.expect(s.t0Date).to.eql(pm.collectionVariables.get('t0Date'));",
+                  "    pm.expect(s.portfolioId).to.eql('ALL');",
+                  "    pm.expect(s.currency).to.eql('USD');",
+                  "});",
+                  "pm.test('periods are T0, T-1 .. T-36', () => {",
+                  "    pm.expect(s.periods).to.have.lengthOf(37);",
+                  "    pm.expect(s.periods[0]).to.eql('T0');",
+                  "    pm.expect(s.periods[1]).to.eql('T-1');",
+                  "    pm.expect(s.periods[36]).to.eql('T-36');",
+                  "});",
+                  "pm.test('period_values: Balance, Revenue, Expense first, one value (or null) per period', () => {",
+                  "    pm.expect(s.period_values.slice(0, 3).map(r => r.accountId)).to.eql(['210001', '400001', '500001']);",
+                  "    pm.expect(s.period_values.slice(0, 3).map(r => r.measure)).to.eql(['Balance', 'Revenue', 'Expense']);",
+                  "    s.period_values.forEach(r => {",
+                  "        pm.expect(r.values).to.have.lengthOf(s.periods.length);",
+                  "        r.values.forEach(v => pm.expect(v === null || typeof v === 'number').to.be.true);",
+                  "    });",
+                  "});"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Create forecast invalid body -> 400 VALIDATION_FAILED",
+          "name": "Variance aggregate summary",
           "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
+            "method": "GET",
+            "header": [],
             "url": {
-              "raw": "{{forecastingDirectUrl}}/forecasts",
+              "raw": "{{baseUrl}}/ccar/v1/variance/aggregate-summary?hierarchyType=BU&hierarchyId={{v1RootBuId}}&portfolioId=ALL&t0Date={{t0Date}}",
               "host": [
-                "{{forecastingDirectUrl}}"
+                "{{baseUrl}}"
               ],
               "path": [
-                "forecasts"
+                "ccar",
+                "v1",
+                "variance",
+                "aggregate-summary"
+              ],
+              "query": [
+                {
+                  "key": "hierarchyType",
+                  "value": "BU"
+                },
+                {
+                  "key": "hierarchyId",
+                  "value": "{{v1RootBuId}}"
+                },
+                {
+                  "key": "portfolioId",
+                  "value": "ALL"
+                },
+                {
+                  "key": "t0Date",
+                  "value": "{{t0Date}}"
+                }
               ]
             },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"scenario\": \"ADVERSE\",\n  \"businessUnit\": \"\",\n  \"metric\": \"NET_INTEREST_INCOME\",\n  \"period\": \"2027-05\",\n  \"amount\": null\n}",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              }
-            },
-            "description": "Blank businessUnit, period not like 2027-Q1, missing amount."
+            "description": "Months without data come back as null; the UI shows \"-\"."
           },
           "event": [
             {
@@ -2758,9 +3087,461 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"400 VALIDATION_FAILED\", () => {",
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const s = pm.response.json();",
+                  "pm.test('scope is the requested node', () => {",
+                  "    pm.expect(s.scope).to.include({ type: 'BU', id: Number(pm.collectionVariables.get('v1RootBuId')) });",
+                  "    pm.expect(s.scope).to.have.keys('type', 'id', 'name', 'level');",
+                  "});",
+                  "pm.test('echoes t0Date, portfolio and currency', () => {",
+                  "    pm.expect(s.t0Date).to.eql(pm.collectionVariables.get('t0Date'));",
+                  "    pm.expect(s.portfolioId).to.eql('ALL');",
+                  "    pm.expect(s.currency).to.eql('USD');",
+                  "});",
+                  "pm.test('periods are T0, T-1 .. T-36', () => {",
+                  "    pm.expect(s.periods).to.have.lengthOf(37);",
+                  "    pm.expect(s.periods[0]).to.eql('T0');",
+                  "    pm.expect(s.periods[1]).to.eql('T-1');",
+                  "    pm.expect(s.periods[36]).to.eql('T-36');",
+                  "});",
+                  "pm.test('period_values: Balance, Revenue, Expense first, one value (or null) per period', () => {",
+                  "    pm.expect(s.period_values.slice(0, 3).map(r => r.accountId)).to.eql(['210001', '400001', '500001']);",
+                  "    pm.expect(s.period_values.slice(0, 3).map(r => r.measure)).to.eql(['Balance', 'Revenue', 'Expense']);",
+                  "    s.period_values.forEach(r => {",
+                  "        pm.expect(r.values).to.have.lengthOf(s.periods.length);",
+                  "        r.values.forEach(v => pm.expect(v === null || typeof v === 'number').to.be.true);",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Forecast aggregate summary (one portfolio, child node)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/v1/forecast/aggregate-summary?hierarchyType=bu&hierarchyId={{v1ChildBuId}}&portfolioId={{portfolioId}}&t0Date={{t0Date}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "v1",
+                "forecast",
+                "aggregate-summary"
+              ],
+              "query": [
+                {
+                  "key": "hierarchyType",
+                  "value": "bu"
+                },
+                {
+                  "key": "hierarchyId",
+                  "value": "{{v1ChildBuId}}"
+                },
+                {
+                  "key": "portfolioId",
+                  "value": "{{portfolioId}}"
+                },
+                {
+                  "key": "t0Date",
+                  "value": "{{t0Date}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const s = pm.response.json();",
+                  "pm.test('scope is the level-2 child, type upper-cased', () => {",
+                  "    pm.expect(s.scope.id).to.eql(Number(pm.collectionVariables.get('v1ChildBuId')));",
+                  "    pm.expect(s.scope.type).to.eql('BU');",
+                  "    pm.expect(s.scope.level).to.eql(2);",
+                  "});",
+                  "pm.test('portfolio echoed', () => pm.expect(s.portfolioId).to.eql(pm.collectionVariables.get('portfolioId')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Forecast detailed breakdown",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/v1/forecast/detailed-breakdown?hierarchyType=BU&hierarchyId={{v1RootBuId}}&portfolioId=ALL&t0Date={{t0Date}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "v1",
+                "forecast",
+                "detailed-breakdown"
+              ],
+              "query": [
+                {
+                  "key": "hierarchyType",
+                  "value": "BU"
+                },
+                {
+                  "key": "hierarchyId",
+                  "value": "{{v1RootBuId}}"
+                },
+                {
+                  "key": "portfolioId",
+                  "value": "ALL"
+                },
+                {
+                  "key": "t0Date",
+                  "value": "{{t0Date}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('page metadata', () => {",
+                  "    pm.expect(b).to.include({ page: 0, size: 25 });",
+                  "    pm.expect(b.totalPages).to.eql(Math.ceil(b.totalElements / b.size));",
+                  "    pm.expect(b.items.length).to.be.at.most(b.size);",
+                  "});",
+                  "pm.test('periods start T0, T+1', () => pm.expect(b.periods.slice(0, 2)).to.eql(['T0', 'T+1']));",
+                  "pm.test('items are direct children of the scope with data_rows', () => {",
+                  "    b.items.forEach(i => {",
+                  "        pm.expect(i).to.have.keys('id', 'name', 'hType', 'level', 'childCount', 'data_rows');",
+                  "        pm.expect(i.hType).to.eql('BU');",
+                  "        pm.expect(i.level).to.eql(b.scope.level + 1);",
+                  "        pm.expect(i.data_rows.slice(0, 3).map(r => r.measure)).to.eql(['Balance', 'Revenue', 'Expense']);",
+                  "        i.data_rows.forEach(r => pm.expect(r.values).to.have.lengthOf(b.periods.length));",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Actuals detailed breakdown",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/v1/actuals/detailed-breakdown?hierarchyType=BU&hierarchyId={{v1RootBuId}}&portfolioId=ALL&t0Date={{t0Date}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "v1",
+                "actuals",
+                "detailed-breakdown"
+              ],
+              "query": [
+                {
+                  "key": "hierarchyType",
+                  "value": "BU"
+                },
+                {
+                  "key": "hierarchyId",
+                  "value": "{{v1RootBuId}}"
+                },
+                {
+                  "key": "portfolioId",
+                  "value": "ALL"
+                },
+                {
+                  "key": "t0Date",
+                  "value": "{{t0Date}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('page metadata', () => {",
+                  "    pm.expect(b).to.include({ page: 0, size: 25 });",
+                  "    pm.expect(b.totalPages).to.eql(Math.ceil(b.totalElements / b.size));",
+                  "    pm.expect(b.items.length).to.be.at.most(b.size);",
+                  "});",
+                  "pm.test('periods start T0, T-1', () => pm.expect(b.periods.slice(0, 2)).to.eql(['T0', 'T-1']));",
+                  "pm.test('items are direct children of the scope with data_rows', () => {",
+                  "    b.items.forEach(i => {",
+                  "        pm.expect(i).to.have.keys('id', 'name', 'hType', 'level', 'childCount', 'data_rows');",
+                  "        pm.expect(i.hType).to.eql('BU');",
+                  "        pm.expect(i.level).to.eql(b.scope.level + 1);",
+                  "        pm.expect(i.data_rows.slice(0, 3).map(r => r.measure)).to.eql(['Balance', 'Revenue', 'Expense']);",
+                  "        i.data_rows.forEach(r => pm.expect(r.values).to.have.lengthOf(b.periods.length));",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Variance detailed breakdown",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/v1/variance/detailed-breakdown?hierarchyType=BU&hierarchyId={{v1RootBuId}}&portfolioId=ALL&t0Date={{t0Date}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "v1",
+                "variance",
+                "detailed-breakdown"
+              ],
+              "query": [
+                {
+                  "key": "hierarchyType",
+                  "value": "BU"
+                },
+                {
+                  "key": "hierarchyId",
+                  "value": "{{v1RootBuId}}"
+                },
+                {
+                  "key": "portfolioId",
+                  "value": "ALL"
+                },
+                {
+                  "key": "t0Date",
+                  "value": "{{t0Date}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('page metadata', () => {",
+                  "    pm.expect(b).to.include({ page: 0, size: 25 });",
+                  "    pm.expect(b.totalPages).to.eql(Math.ceil(b.totalElements / b.size));",
+                  "    pm.expect(b.items.length).to.be.at.most(b.size);",
+                  "});",
+                  "pm.test('periods start T0, T-1', () => pm.expect(b.periods.slice(0, 2)).to.eql(['T0', 'T-1']));",
+                  "pm.test('items are direct children of the scope with data_rows', () => {",
+                  "    b.items.forEach(i => {",
+                  "        pm.expect(i).to.have.keys('id', 'name', 'hType', 'level', 'childCount', 'data_rows');",
+                  "        pm.expect(i.hType).to.eql('BU');",
+                  "        pm.expect(i.level).to.eql(b.scope.level + 1);",
+                  "        pm.expect(i.data_rows.slice(0, 3).map(r => r.measure)).to.eql(['Balance', 'Revenue', 'Expense']);",
+                  "        i.data_rows.forEach(r => pm.expect(r.values).to.have.lengthOf(b.periods.length));",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Detailed breakdown paging (size=1, page=1)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/v1/forecast/detailed-breakdown?hierarchyType=BU&hierarchyId={{v1RootBuId}}&portfolioId=ALL&t0Date={{t0Date}}&page=1&size=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "v1",
+                "forecast",
+                "detailed-breakdown"
+              ],
+              "query": [
+                {
+                  "key": "hierarchyType",
+                  "value": "BU"
+                },
+                {
+                  "key": "hierarchyId",
+                  "value": "{{v1RootBuId}}"
+                },
+                {
+                  "key": "portfolioId",
+                  "value": "ALL"
+                },
+                {
+                  "key": "t0Date",
+                  "value": "{{t0Date}}"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "size",
+                  "value": "1"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('one item per page', () => {",
+                  "    pm.expect(b).to.include({ page: 1, size: 1 });",
+                  "    pm.expect(b.totalPages).to.eql(b.totalElements);",
+                  "    pm.expect(b.items.length).to.eql(b.totalElements > 1 ? 1 : 0);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "10b Negative - forecasting data",
+      "description": "Validation and not-found errors of ccar-forecasting-service, in the shared problem+json format. Runs after folder 10, which stores {{t0Date}} and {{v1RootBuId}}.",
+      "item": [
+        {
+          "name": "Unsupported hierarchy type -> 404 HIERARCHY_NOT_FOUND",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/v1/forecast/aggregate-summary?hierarchyType=NOSUCHTYPE&hierarchyId=1&t0Date={{t0Date}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "v1",
+                "forecast",
+                "aggregate-summary"
+              ],
+              "query": [
+                {
+                  "key": "hierarchyType",
+                  "value": "NOSUCHTYPE"
+                },
+                {
+                  "key": "hierarchyId",
+                  "value": "1"
+                },
+                {
+                  "key": "t0Date",
+                  "value": "{{t0Date}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 HIERARCHY_NOT_FOUND\", () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"HIERARCHY_NOT_FOUND\");",
+                  "});",
+                  "pm.test('hierarchyType in body', () => pm.expect(pm.response.json().hierarchyType).to.eql('NOSUCHTYPE'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unsupported hierarchy root type -> 404 HIERARCHY_NOT_FOUND",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/v1/hierarchy/root/NOSUCHTYPE",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "v1",
+                "hierarchy",
+                "root",
+                "NOSUCHTYPE"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 HIERARCHY_NOT_FOUND\", () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"HIERARCHY_NOT_FOUND\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Malformed hierarchy type -> 400 INVALID_PARAMETER",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/v1/hierarchy/root/1BAD-TYPE",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "v1",
+                "hierarchy",
+                "root",
+                "1BAD-TYPE"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 INVALID_PARAMETER\", () => {",
                   "    pm.response.to.have.status(400);",
-                  "    pm.expect(pm.response.json().errorCode).to.eql(\"VALIDATION_FAILED\");",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"INVALID_PARAMETER\");",
                   "});"
                 ]
               }
@@ -2768,22 +3549,81 @@
           ]
         },
         {
-          "name": "Unknown scenario -> 400 INVALID_PARAMETER",
+          "name": "Unknown node -> 404 HIERARCHY_NODE_NOT_FOUND",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{forecastingDirectUrl}}/forecasts?scenario=MILD",
+              "raw": "{{baseUrl}}/ccar/v1/actuals/aggregate-summary?hierarchyType=BU&hierarchyId=999999999&t0Date={{t0Date}}",
               "host": [
-                "{{forecastingDirectUrl}}"
+                "{{baseUrl}}"
               ],
               "path": [
-                "forecasts"
+                "ccar",
+                "v1",
+                "actuals",
+                "aggregate-summary"
               ],
               "query": [
                 {
-                  "key": "scenario",
-                  "value": "MILD"
+                  "key": "hierarchyType",
+                  "value": "BU"
+                },
+                {
+                  "key": "hierarchyId",
+                  "value": "999999999"
+                },
+                {
+                  "key": "t0Date",
+                  "value": "{{t0Date}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 HIERARCHY_NODE_NOT_FOUND\", () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"HIERARCHY_NODE_NOT_FOUND\");",
+                  "});",
+                  "pm.test('nodeId in body', () => pm.expect(pm.response.json().nodeId).to.eql(999999999));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Non-numeric hierarchyId -> 400 INVALID_PARAMETER",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/v1/forecast/aggregate-summary?hierarchyType=BU&hierarchyId=abc&t0Date={{t0Date}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "v1",
+                "forecast",
+                "aggregate-summary"
+              ],
+              "query": [
+                {
+                  "key": "hierarchyType",
+                  "value": "BU"
+                },
+                {
+                  "key": "hierarchyId",
+                  "value": "abc"
+                },
+                {
+                  "key": "t0Date",
+                  "value": "{{t0Date}}"
                 }
               ]
             }
@@ -2804,18 +3644,30 @@
           ]
         },
         {
-          "name": "Get unknown forecast -> 404 RESOURCE_NOT_FOUND",
+          "name": "Missing t0Date -> 400 INVALID_PARAMETER",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{forecastingDirectUrl}}/forecasts/999999999",
+              "raw": "{{baseUrl}}/ccar/v1/forecast/aggregate-summary?hierarchyType=BU&hierarchyId={{v1RootBuId}}",
               "host": [
-                "{{forecastingDirectUrl}}"
+                "{{baseUrl}}"
               ],
               "path": [
-                "forecasts",
-                "999999999"
+                "ccar",
+                "v1",
+                "forecast",
+                "aggregate-summary"
+              ],
+              "query": [
+                {
+                  "key": "hierarchyType",
+                  "value": "BU"
+                },
+                {
+                  "key": "hierarchyId",
+                  "value": "{{v1RootBuId}}"
+                }
               ]
             }
           },
@@ -2825,29 +3677,152 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"404 RESOURCE_NOT_FOUND\", () => {",
-                  "    pm.response.to.have.status(404);",
-                  "    pm.expect(pm.response.json().errorCode).to.eql(\"RESOURCE_NOT_FOUND\");",
+                  "pm.test(\"400 INVALID_PARAMETER\", () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"INVALID_PARAMETER\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Bad t0Date format -> 400 INVALID_PARAMETER",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/v1/forecast/aggregate-summary?hierarchyType=BU&hierarchyId={{v1RootBuId}}&t0Date=30-09-2026",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "v1",
+                "forecast",
+                "aggregate-summary"
+              ],
+              "query": [
+                {
+                  "key": "hierarchyType",
+                  "value": "BU"
+                },
+                {
+                  "key": "hierarchyId",
+                  "value": "{{v1RootBuId}}"
+                },
+                {
+                  "key": "t0Date",
+                  "value": "30-09-2026"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 INVALID_PARAMETER\", () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"INVALID_PARAMETER\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unsafe portfolioId -> 400 INVALID_PARAMETER",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/v1/forecast/aggregate-summary?hierarchyType=BU&hierarchyId={{v1RootBuId}}&t0Date={{t0Date}}&portfolioId=P1%22%3Bdelete",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "v1",
+                "forecast",
+                "aggregate-summary"
+              ],
+              "query": [
+                {
+                  "key": "hierarchyType",
+                  "value": "BU"
+                },
+                {
+                  "key": "hierarchyId",
+                  "value": "{{v1RootBuId}}"
+                },
+                {
+                  "key": "t0Date",
+                  "value": "{{t0Date}}"
+                },
+                {
+                  "key": "portfolioId",
+                  "value": "P1%22%3Bdelete"
+                }
+              ]
+            },
+            "description": "Portfolio ids are spliced into the q query as symbols, so only letters, digits, '_', '.' and '-' are accepted."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 INVALID_PARAMETER\", () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"INVALID_PARAMETER\");",
                   "});",
-                  "pm.test('forecastId in body', () => pm.expect(pm.response.json().forecastId).to.eql(999999999));"
+                  "pm.test('parameter in body', () => pm.expect(pm.response.json().parameter).to.eql('portfolioId'));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Delete forecast -> 204",
+          "name": "Negative page -> 400 INVALID_PARAMETER",
           "request": {
-            "method": "DELETE",
+            "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{forecastingDirectUrl}}/forecasts/{{forecastId}}",
+              "raw": "{{baseUrl}}/ccar/v1/forecast/detailed-breakdown?hierarchyType=BU&hierarchyId={{v1RootBuId}}&portfolioId=ALL&t0Date={{t0Date}}&page=-1",
               "host": [
-                "{{forecastingDirectUrl}}"
+                "{{baseUrl}}"
               ],
               "path": [
-                "forecasts",
-                "{{forecastId}}"
+                "ccar",
+                "v1",
+                "forecast",
+                "detailed-breakdown"
+              ],
+              "query": [
+                {
+                  "key": "hierarchyType",
+                  "value": "BU"
+                },
+                {
+                  "key": "hierarchyId",
+                  "value": "{{v1RootBuId}}"
+                },
+                {
+                  "key": "portfolioId",
+                  "value": "ALL"
+                },
+                {
+                  "key": "t0Date",
+                  "value": "{{t0Date}}"
+                },
+                {
+                  "key": "page",
+                  "value": "-1"
+                }
               ]
             }
           },
@@ -2857,25 +3832,103 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status is 204\", () => pm.response.to.have.status(204));"
+                  "pm.test(\"400 INVALID_PARAMETER\", () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"INVALID_PARAMETER\");",
+                  "});"
                 ]
               }
             }
           ]
         },
         {
-          "name": "Delete forecast again -> 404 RESOURCE_NOT_FOUND",
+          "name": "Page size over the maximum -> 400 INVALID_PARAMETER",
           "request": {
-            "method": "DELETE",
+            "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{forecastingDirectUrl}}/forecasts/{{forecastId}}",
+              "raw": "{{baseUrl}}/ccar/v1/forecast/detailed-breakdown?hierarchyType=BU&hierarchyId={{v1RootBuId}}&portfolioId=ALL&t0Date={{t0Date}}&size=501",
               "host": [
-                "{{forecastingDirectUrl}}"
+                "{{baseUrl}}"
               ],
               "path": [
-                "forecasts",
-                "{{forecastId}}"
+                "ccar",
+                "v1",
+                "forecast",
+                "detailed-breakdown"
+              ],
+              "query": [
+                {
+                  "key": "hierarchyType",
+                  "value": "BU"
+                },
+                {
+                  "key": "hierarchyId",
+                  "value": "{{v1RootBuId}}"
+                },
+                {
+                  "key": "portfolioId",
+                  "value": "ALL"
+                },
+                {
+                  "key": "t0Date",
+                  "value": "{{t0Date}}"
+                },
+                {
+                  "key": "size",
+                  "value": "501"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"400 INVALID_PARAMETER\", () => {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"INVALID_PARAMETER\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Unknown data set -> 404 RESOURCE_NOT_FOUND",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/v1/budget/aggregate-summary?hierarchyType=BU&hierarchyId={{v1RootBuId}}&portfolioId=ALL&t0Date={{t0Date}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "v1",
+                "budget",
+                "aggregate-summary"
+              ],
+              "query": [
+                {
+                  "key": "hierarchyType",
+                  "value": "BU"
+                },
+                {
+                  "key": "hierarchyId",
+                  "value": "{{v1RootBuId}}"
+                },
+                {
+                  "key": "portfolioId",
+                  "value": "ALL"
+                },
+                {
+                  "key": "t0Date",
+                  "value": "{{t0Date}}"
+                }
               ]
             }
           },
@@ -2889,6 +3942,74 @@
                   "    pm.response.to.have.status(404);",
                   "    pm.expect(pm.response.json().errorCode).to.eql(\"RESOURCE_NOT_FOUND\");",
                   "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST portfolios -> 405 METHOD_NOT_ALLOWED",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/v1/portfolios",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "v1",
+                "portfolios"
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"405 METHOD_NOT_ALLOWED\", () => {",
+                  "    pm.response.to.have.status(405);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"METHOD_NOT_ALLOWED\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "No token -> 401 UNAUTHORIZED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/v1/portfolios",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "v1",
+                "portfolios"
+              ]
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"401 UNAUTHORIZED\", () => {",
+                  "    pm.response.to.have.status(401);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"UNAUTHORIZED\");",
+                  "});",
+                  "pm.test('answered by the gateway', () => pm.expect(pm.response.json().service).to.eql('ccar-api-gateway'));"
                 ]
               }
             }

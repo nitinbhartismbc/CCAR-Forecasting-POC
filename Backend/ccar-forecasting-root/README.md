@@ -1,7 +1,7 @@
 # CCAR-Forecasting-POC
 
-Backend for the CCAR Forecasting POC: a multi-module Maven project with an API gateway, two Spring Boot
-services (forecast data from KDB+, and users / login), a reusable KDB+ client starter and a shared
+Backend for the CCAR Forecasting POC: a multi-module Maven project with an API gateway, three Spring Boot
+services (BU / GEO hierarchies from KDB+, users / login, and forecast / actuals / variance data from KDB+), a reusable KDB+ client starter and a shared
 error-handling and tracing library.
 
 - Error contract, error codes and tracing: [ERROR_HANDLING.md](ERROR_HANDLING.md)
@@ -38,31 +38,36 @@ error-handling and tracing library.
                                                       │  4 route (timeouts)           │
                                                       │  on failure: Fallback /       │
                                                       │  ReactiveGlobalExcHandler     │
-                                                      └──────┬─────────────────┬──────┘
-                                     /ccar/forecast/**       │                 │   /users, /users/**
-                                     (35 s timeout)          ▼                 ▼   (10 s timeout)
-                              ┌──────────────────────────────┐   ┌──────────────────────────────┐
-                              │ ccar-hierarchy-service :8081 │   │ ccar-user-service   :8082    │
-                              │ CcarForecastController       │   │ UserController               │
-                              │ HierarchyService (BU,GEO,..) │   │ UserServiceImpl (BCrypt,JWT) │
-                              │ KdbService                   │   │ (ccar-common exc. handler)   │
-                              │ (ccar-common exc. handler)   │   └──────────────┬───────────────┘
-                              │   └ kdb-client-starter       │                  │ JPA
-                              │     (KdbTemplate + pool)     │                  ▼
-                              └──────────────┬───────────────┘           ┌─────────────┐
-                                             │ q IPC (30 s read timeout) │ H2 (memory) │
-                                             ▼                           └─────────────┘
-                                      ┌─────────────┐
-                                      │ KDB+  :5173 │  forecast_ccar, BU_HIERARCHY, GEO_HIERARCHY
-                                      └─────────────┘
+                                                      └───────────────┬───────────────┘
+                                                                      │
+                 ┌────────────────────────────────┬───────────────────┴────────────┐
+                 │ /ccar/forecast/** (35 s)       │ /ccar/v1/** (35 s)             │ /users/** (10 s)
+                 ▼                                ▼                                ▼
+  ┌─────────────────────────────┐  ┌─────────────────────────────┐  ┌─────────────────────────────┐
+  │ ccar-hierarchy-service:8081 │  │ ccar-forecasting-service    │  │ ccar-user-service :8082     │
+  │ HierarchyController         │  │   :8083, /ccar/v1           │  │ UserController              │
+  │ HierarchyService (BU,GEO..) │  │ ForecastingController       │  │ UserServiceImpl             │
+  │ HierarchyCache (per type)   │  │ ReferenceDataController     │  │   (BCrypt, JWT)             │
+  │ (ccar-common exc. handler)  │  │ ForecastingService          │  │ (ccar-common exc. handler)  │
+  │   └ kdb-client-starter      │  │ HierarchyRepository (cache) │  └──────────────┬──────────────┘
+  │     (KdbTemplate + pool)    │  │ FactDataRepository          │                 │ JPA
+  └──────────────┬──────────────┘  │   └ kdb-client-starter      │                 │
+                 │                 └──────────────┬──────────────┘                 │
+                 │   q IPC (30 s read timeout)    │                                ▼
+                 ▼                                ▼                         ┌─────────────┐
+          ┌────────────────────────────────────────────────────────────┐    │ H2 (memory) │
+          │ KDB+ :5173   BU_HIERARCHY, GEO_HIERARCHY,                  │    └─────────────┘
+          │              CCAR_FORECAST, CCAR_ACTUALS, CCAR_VARIANCE    │
+          └────────────────────────────────────────────────────────────┘
 
-  ccar-common (shared library, used by gateway, ccar-hierarchy-service and user-service):
+  ccar-common (shared library, used by the gateway and all three services):
   ErrorCode catalogue · RFC 9457 problem+json · correlation-id filter · GlobalExceptionHandler · AOP logging
 ```
 
 - Every production request enters through the **gateway on :8089**. It assigns or keeps the correlation id,
   validates the JWT (issued by user-service with the same HS512 secret) and routes to the service.
-- ccar-hierarchy-service reads KDB+ only through the pooled `KdbTemplate` from `kdb-client-starter`.
+- ccar-hierarchy-service and ccar-forecasting-service read KDB+ only through the pooled `KdbTemplate` from
+  `kdb-client-starter`.
 - All services return errors in one format (`application/problem+json`) with an `errorCode` and the
   `correlationId`.
 
@@ -130,10 +135,12 @@ See [`kdb-client-starter/README.md`](kdb-client-starter/README.md) for full usag
 
 ### `ccar-hierarchy-service`
 
-Forecast data and the Business Unit (BU) hierarchy, read from KDB+. Port **8081**, context path **`/ccar`**.
+Hierarchies (BU, GEO, …) read from KDB+ and cached in memory. Port **8081**, context path **`/ccar`**.
 
-- `controller/CcarForecastController`: `GET /forecast/forecast-ccar`.
-- `service/KdbService`: runs `select from forecast_ccar` and returns it as JSON.
+> The old `GET /forecast/forecast-ccar` endpoint (`CcarForecastController` + `KdbService`) has been removed;
+> that path now returns `404 RESOURCE_NOT_FOUND`. Forecast, actuals and variance data are served by
+> `ccar-forecasting-service` under `/ccar/v1`.
+
 - **Generic hierarchies** (BU, GEO and any future type), all served by the same code:
   - `controller/HierarchyController`: `/forecast/hierarchy/{type}/…`, where `{type}` is `BU`, `GEO`, …
     (case-insensitive).
@@ -165,16 +172,43 @@ Registration, profiles and login; issues the JWT the gateway validates. Port **8
 
 ### `ccar-forecasting-service`
 
-CCAR stress-scenario forecasts. Port **8083**. Starter structure; the store is in memory for now.
+The UI's data API: portfolios, T0 dates, the flat hierarchy, and forecast / actuals / variance totals for any
+hierarchy node, read from KDB+. Port **8083**, context path **`/ccar`**, all endpoints under **`/ccar/v1`**
+(gateway route `/ccar/v1/**`). Endpoints: [Forecasting data (/ccar/v1)](#forecasting-data-ccarv1).
 
-- `controller/ForecastingController`: `GET /forecasts[?scenario=]`, `GET /forecasts/{id}`, `POST /forecasts`
-  (201 + `Location`), `DELETE /forecasts/{id}`.
-- `service/ForecastingService` / `ForecastingServiceImpl`: in-memory store (`ConcurrentHashMap`), to be replaced
-  by the real data source. Unknown ids throw `CcarException(RESOURCE_NOT_FOUND)`.
-- `model/Forecast` (record), `model/Scenario` (`BASELINE`, `ADVERSE`, `SEVERELY_ADVERSE`),
-  `dto/ForecastRequest` (validated).
-- Errors, correlation id and controller/service logging come from ccar-common; the service has no handler or
-  aspect of its own. Not routed through the gateway yet.
+- `controller/ReferenceDataController`: `GET /v1/portfolios`, `GET /v1/t0-dates`,
+  `GET /v1/hierarchy/root/{type}`, `POST /v1/hierarchy/{type}/reload`.
+- `controller/ForecastingController`: `GET /v1/{forecast|actuals|variance}/aggregate-summary` and
+  `.../detailed-breakdown`.
+- `service/ForecastingService`: turns the flat KDB results into the UI JSON. Every configured account (Balance,
+  Revenue, Expense) is always returned in configured order; a period without data is `null` (the UI shows "-").
+  Paging of the breakdown is done on the cached children, so KDB+ is only asked for the page shown.
+- `hierarchy/HierarchyRepository`: loads each configured hierarchy table (`ccar.forecasting.hierarchy.types.*`)
+  once and caches it as an immutable snapshot (flat list + parent index). Warmed at startup; retried on the next
+  request after a failure; `POST /v1/hierarchy/{type}/reload` re-reads it.
+- `repository/FactDataRepository`: builds one q query per request. Aggregation happens in KDB+: each fact row
+  is joined (`ej`) to the hierarchy table on its node column and grouped by its ancestor at the requested level
+  (`<P>_ID_LEVELn`), so a node's total covers its whole subtree. Each period also returns its count of non-null
+  values (`N__<col>`) because q's `sum` turns all-null into 0. The `c.Flip` result is read with
+  `kdb/FlipReader`.
+- `repository/ReferenceDataRepository`: `exec distinct` of portfolio ids and T0 dates from
+  `ccar.forecasting.reference-table`.
+- `kdb/QIdentifiers`: everything spliced into q text is a validated identifier from configuration, a number, a
+  date, or a request value matching `[A-Za-z0-9_.-]{1,64}`, so request input cannot change a query.
+- **Expected fact table layout** (`CCAR_FORECAST`, `CCAR_ACTUALS`, `CCAR_VARIANCE`; names configurable):
+
+  | Column | q type | Meaning |
+  |---|---|---|
+  | `BU_ID`, `GEO_ID` | `j` | Node the row is booked against in each hierarchy (`fact-column` of the type) |
+  | `ACCOUNT_ID` | `j` or `s` | `210001` Balance, `400001` Revenue, `500001` Expense |
+  | `PORTFOLIO_ID` | `s` | Portfolio |
+  | `T0_DATE` | `d` | Quarter-end reference date |
+  | `T0`, `T_1` .. `T_36` | `j` or `f` | Forecast: T0, T+1 .. T+36. Actuals / variance: T0, T-1 .. T-36. Null = no data |
+
+  [`CCAR_FACT_TABLES_LOAD.q`](CCAR_FACT_TABLES_LOAD.q) builds sample tables in this layout from `BU_HIERARCHY`.
+  Variance is read from its own table, not calculated by the service.
+- Errors, correlation id and controller/service logging come from ccar-common (`KdbErrorMapper` maps KDB
+  failures to 503 / 504 / 502); the service has no handler or aspect of its own.
 
 ### `ccar-api-gateway`
 
@@ -186,7 +220,9 @@ Single entry point, built on Spring Cloud Gateway. Port **8089**.
   `POST /users/login`. Returns 401 `UNAUTHORIZED`, `TOKEN_EXPIRED` or `TOKEN_INVALID` with a
   `WWW-Authenticate` header.
 - Routes with a Resilience4j circuit breaker each (`config/ResilienceConfig`), fallback to
-  `error/FallbackController` (503 / 504). GETs to ccar-hierarchy-service are retried only when the connection is refused.
+  `error/FallbackController` (503 / 504). Routes: `/ccar/forecast/**` → ccar-hierarchy-service,
+  `/ccar/v1/**` → ccar-forecasting-service, `/users/**` → ccar-user-service. GETs to ccar-hierarchy-service and
+  ccar-forecasting-service are retried only when the connection is refused.
 - Errors: ccar-common's shared `ReactiveGlobalExceptionHandler`: unknown route 404, downstream 503/504,
   unexpected 500, all in the shared format.
 
@@ -197,14 +233,16 @@ Single entry point, built on Spring Cloud Gateway. Port **8089**.
 | API gateway (use this) | `http://localhost:8089` |
 | ccar-hierarchy-service (direct) | `http://localhost:8081/ccar` |
 | ccar-user-service (direct) | `http://localhost:8082` |
-| KDB+ | as configured in `ccar-hierarchy-service/src/main/resources/application.properties` (`kdb.host`, `kdb.port`) |
+| ccar-forecasting-service (direct) | `http://localhost:8083/ccar` |
+| KDB+ | `kdb.host`, `kdb.port` in the `application.properties` of ccar-hierarchy-service and ccar-forecasting-service |
 | UI (Vite dev server) | `http://localhost:5173` |
 
 ## Prerequisites
 
 - Java 21 (the two libraries target 17)
 - Maven 3.8+, or the bundled wrapper `./ccar-hierarchy-service/mvnw`
-- A running KDB+ instance with the `forecast_ccar`, `BU_HIERARCHY` and `GEO_HIERARCHY` tables
+- A running KDB+ instance with the `BU_HIERARCHY` and `GEO_HIERARCHY` tables, and for ccar-forecasting-service
+  the `CCAR_FORECAST`, `CCAR_ACTUALS` and `CCAR_VARIANCE` tables
 - `curl` (examples below use bash / Git Bash; PowerShell equivalents are given for the login step)
 
 ## Build and test
@@ -229,11 +267,21 @@ Start the components in this order, each in its own terminal.
 
 ```
 q -p 5173
-q)/ forecast_ccar: paste ccar-hierarchy-service/src/main/resources/KDB_Tables.txt
 q)\l BU_HIERARCHY_LOAD.q          / BU_HIERARCHY from BU_HIERARCHY1.csv (see the header of the script)
+q)/ GEO_HIERARCHY: same layout with the GEO_ prefix
+q)/   sample data: ccar-hierarchy-service/src/main/resources/GEO_HIERARCHY_FLAT.csv
 ```
 
 `BU_HIERARCHY_INSERT_100.q` loads only the first 100 rows, useful for a quick test.
+
+Sample forecast / actuals / variance tables for ccar-forecasting-service (built from `BU_HIERARCHY`, and from
+`GEO_HIERARCHY` when it exists; 4 T0 dates × 2 portfolios × 3 accounts per leaf BU):
+
+```
+q)\l CCAR_FACT_TABLES_LOAD.q
+q)build[]                                             / in the KDB+ server's own session
+q)/ or, from a local q session: pullBuildPush[`:192.168.11.200:5173:test:test@123]
+```
 
 **2. ccar-hierarchy-service**
 
@@ -241,7 +289,7 @@ q)\l BU_HIERARCHY_LOAD.q          / BU_HIERARCHY from BU_HIERARCHY1.csv (see the
 cd ccar-hierarchy-service && ./mvnw spring-boot:run
 ```
 
-On startup it loads the BU hierarchy from KDB+ and logs `BU hierarchy loaded: N node(s) ...`. If KDB+ is not
+On startup it loads every configured hierarchy (BU, GEO) from KDB+ and logs `BU hierarchy loaded: N node(s) ...`. If KDB+ is not
 reachable it logs the error and keeps running; hierarchy requests then return 503 until KDB+ is back.
 
 **3. ccar-user-service**
@@ -250,27 +298,37 @@ reachable it logs the error and keeps running; hierarchy requests then return 50
 cd ccar-user-service && ../ccar-hierarchy-service/mvnw spring-boot:run
 ```
 
-**4. ccar-api-gateway**
+**4. ccar-forecasting-service**
+
+```bash
+cd ccar-forecasting-service && ../ccar-hierarchy-service/mvnw spring-boot:run
+```
+
+On startup it loads the BU and GEO hierarchies and logs `BU hierarchy loaded from BU_HIERARCHY: N node(s) ...`.
+A hierarchy that fails to load (KDB+ down, table missing) is logged and retried on its next request.
+
+**5. ccar-api-gateway**
 
 ```bash
 cd ccar-api-gateway && ./mvnw spring-boot:run
 ```
 
-**5. UI (optional)**
+**6. UI (optional)**
 
 ```bash
 cd ../../ccar_ui && npm install && npm run dev
 ```
 
-Logs are written to `logs/ccar.log` (ccar-hierarchy-service), `logs/ccar-api-gateway.log` (gateway) and the console
-(user-service). Every line carries the correlation id.
+Logs are written to `logs/ccar.log` (ccar-hierarchy-service), `logs/ccar-api-gateway.log` (gateway),
+`logs/ccar-forecasting-service.log` (forecasting-service) and the console (user-service). Every line carries the correlation id.
 
 ---
 
 ## Step-by-step API walkthrough (login first)
 
 All calls go through the gateway on **:8089**. Only registration and login are public; everything else needs
-the JWT from step 2.
+the JWT from step 2. The forecast / actuals / variance screens use
+[Forecasting data (/ccar/v1)](#forecasting-data-ccarv1).
 
 > **About the seeded users in `data.sql`:** their `password_hash` values are SHA-256 digests from an older
 > version, but login now checks passwords with BCrypt, so those users **cannot log in**. Register a new user
@@ -343,30 +401,7 @@ $H = @{ Authorization = "Bearer $TOKEN" }
 
 The token is valid for 1 hour. After that every call returns `401 TOKEN_EXPIRED`; log in again.
 
-### Step 4 – Get the forecast data
-
-```bash
-curl -s http://localhost:8089/ccar/forecast/forecast-ccar \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "X-Correlation-Id: demo-001"
-```
-
-PowerShell: `Invoke-RestMethod http://localhost:8089/ccar/forecast/forecast-ccar -Headers $H`
-
-`200 OK` (shortened)
-
-```json
-{
-  "forecast_ccar": {
-    "data": [
-      { "OP_CODE_ID": 10000001, "ACCOUNT_ID": 210001, "CCY_CODE": "CHF", "PORTFOLIO_ID": "PORT_0001",
-        "T0_DATE": "2025-12-31", "T0": 100000, "T_1": 100001, "...": "...", "T_36": 100036 }
-    ]
-  }
-}
-```
-
-### Step 5 – Get the top of a hierarchy (BU, GEO, …)
+### Step 4 – Get the top of a hierarchy (BU, GEO, …)
 
 ```bash
 # which hierarchies exist, and are they loaded?
@@ -390,14 +425,14 @@ The `{type}` path segment selects the hierarchy; every endpoint below works the 
 }
 ```
 
-### Step 6 – Open one node (node plus direct children)
+### Step 5 – Open one node (node plus direct children)
 
 ```bash
 curl -s "http://localhost:8089/ccar/forecast/hierarchy/BU/2?depth=1" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-### Step 7 – Lazy-load the children of a node (for expanding a tree node)
+### Step 6 – Lazy-load the children of a node (for expanding a tree node)
 
 ```bash
 curl -s http://localhost:8089/ccar/forecast/hierarchy/GEO/2/children \
@@ -407,7 +442,7 @@ curl -s http://localhost:8089/ccar/forecast/hierarchy/GEO/2/children \
 Returns a JSON array of nodes without grandchildren. An unknown id returns `404` with
 `"errorCode": "HIERARCHY_NODE_NOT_FOUND"`; an unknown type returns `404 HIERARCHY_NOT_FOUND`.
 
-### Step 8 – Reload a hierarchy after its KDB table changed
+### Step 7 – Reload a hierarchy after its KDB table changed
 
 ```bash
 curl -s -X POST http://localhost:8089/ccar/forecast/hierarchy/GEO/reload \
@@ -418,7 +453,7 @@ curl -s -X POST http://localhost:8089/ccar/forecast/hierarchy/GEO/reload \
 { "type": "GEO", "table": "GEO_HIERARCHY", "loaded": true, "nodes": 2916, "loadedAt": "2026-11-11T10:42:07.118Z" }
 ```
 
-### Step 9 – Manage users
+### Step 8 – Manage users
 
 ```bash
 # list all users
@@ -436,7 +471,7 @@ curl -s -X PUT http://localhost:8089/users/1 \
 curl -i -X DELETE http://localhost:8089/users/1 -H "Authorization: Bearer $TOKEN"
 ```
 
-### Step 10 – See the error format (optional)
+### Step 9 – See the error format (optional)
 
 ```bash
 # no token -> 401 UNAUTHORIZED
@@ -462,12 +497,81 @@ Example `401` body (`Content-Type: application/problem+json`, header `WWW-Authen
 }
 ```
 
-If KDB+ is down, step 4 returns `503` with `"errorCode": "KDB_UNAVAILABLE"` and `Retry-After: 30`. Search
+If KDB+ is down when a hierarchy is loaded or reloaded, steps 4-7 return `503` (`KDB_UNAVAILABLE`, or
+`HIERARCHY_UNAVAILABLE` during the retry window) with `Retry-After: 30`. Once loaded, a hierarchy keeps being
+served from the cache while KDB+ is down. Search
 the logs for the `correlationId` to see the full trail across services.
+
+### Forecasting data (/ccar/v1)
+
+ccar-forecasting-service through the gateway, with the token from step 3. Needs the `CCAR_FORECAST`,
+`CCAR_ACTUALS` and `CCAR_VARIANCE` tables (see [Run locally](#run-locally)).
+
+```bash
+# filters for the screen
+curl -s http://localhost:8089/ccar/v1/portfolios -H "Authorization: Bearer $TOKEN"
+# [{"id":"ALL","name":"All Portfolios"},{"id":"PORT_0001","name":"PORT_0001"}, ...]
+
+curl -s http://localhost:8089/ccar/v1/t0-dates -H "Authorization: Bearer $TOKEN"
+# ["2026-09-30","2026-06-30","2026-03-31","2025-12-31"]          latest first
+
+# the whole hierarchy as a flat list (root first); type = BU | GEO
+curl -s http://localhost:8089/ccar/v1/hierarchy/root/BU -H "Authorization: Bearer $TOKEN"
+# [{"id":1,"name":"ALL_BANK","level":1,"parentId":null,"childCount":5,"isLeafNode":false},
+#  {"id":2,"name":"North America","level":2,"parentId":1,"childCount":4,"isLeafNode":false}, ...]
+
+# totals of one node; replace forecast with actuals or variance (periods then run T0, T-1 .. T-36)
+curl -s "http://localhost:8089/ccar/v1/forecast/aggregate-summary?hierarchyType=BU&hierarchyId=1&portfolioId=ALL&t0Date=2026-09-30" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+```json
+{
+  "scope": { "type": "BU", "id": 1, "name": "ALL_BANK", "level": 1 },
+  "t0Date": "2026-09-30",
+  "portfolioId": "ALL",
+  "currency": "USD",
+  "periods": ["T0", "T+1", "T+2", "...", "T+36"],
+  "period_values": [
+    { "accountId": "210001", "measure": "Balance", "values": [8504978, 8516417, 8531029, "...", 9683892] },
+    { "accountId": "400001", "measure": "Revenue", "values": [79214, 79802, null, "...", 96925] },
+    { "accountId": "500001", "measure": "Expense", "values": [730235, 734120, 738011, "...", 868221] }
+  ]
+}
+```
+
+`null` means no data for that period; the UI shows `-`. `values[i]` belongs to `periods[i]`.
+
+```bash
+# direct children of the node, paged (page 0-based, default 0; size default 25, max 500)
+curl -s "http://localhost:8089/ccar/v1/forecast/detailed-breakdown?hierarchyType=BU&hierarchyId=1&portfolioId=ALL&t0Date=2026-09-30&page=0&size=25" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+```json
+{
+  "scope": { "type": "BU", "id": 1, "name": "ALL_BANK", "level": 1 },
+  "t0Date": "2026-09-30", "portfolioId": "ALL", "currency": "USD",
+  "periods": ["T0", "T+1", "...", "T+36"],
+  "page": 0, "size": 25, "totalElements": 5, "totalPages": 1,
+  "items": [
+    { "id": 2, "name": "North America", "hType": "BU", "level": 2, "childCount": 4,
+      "data_rows": [
+        { "accountId": "210001", "measure": "Balance", "values": [3401991, "..."] },
+        { "accountId": "400001", "measure": "Revenue", "values": [31685, "..."] },
+        { "accountId": "500001", "measure": "Expense", "values": [292094, "..."] }
+      ] }
+  ]
+}
+```
+
+Parameters: `hierarchyType` (`BU` | `GEO`, case-insensitive), `hierarchyId`, `t0Date` (`yyyy-MM-dd`) are required;
+`portfolioId` defaults to `ALL`. After a hierarchy table changes in KDB+, reload the service's cache with
+`POST /ccar/v1/hierarchy/{type}/reload`. Swagger UI: `http://localhost:8083/ccar/swagger-ui.html`.
 
 ### Postman
 
-All of the above, plus about 40 negative and tracing cases with automated checks, is in
+All of the above, plus about 60 negative and tracing cases (94 requests) with automated checks, is in
 [`postman/`](postman): import the collection and the `CCAR Local` environment, then run the collection in
 order. See [`postman/README.md`](postman/README.md).
 
@@ -485,12 +589,20 @@ order. See [`postman/README.md`](postman/README.md).
 | `GET` | `/users/{id}` | Bearer | Get a user | `200` user |
 | `PUT` | `/users/{id}` | Bearer | Update a user | `200` user |
 | `DELETE` | `/users/{id}` | Bearer | Delete a user | `204` |
-| `GET` | `/ccar/forecast/forecast-ccar` | Bearer | `forecast_ccar` table as JSON | `200` |
 | `GET` | `/ccar/forecast/hierarchy` | Bearer | Hierarchy types with table and load status | `200` array |
 | `GET` | `/ccar/forecast/hierarchy/{type}?depth={n}` | Bearer | Tree of `BU`, `GEO`, … from the root (`depth` optional, ≥ 0) | `200` node |
 | `GET` | `/ccar/forecast/hierarchy/{type}/{nodeId}?depth={n}` | Bearer | Subtree of one node (`depth` default 1) | `200` node |
 | `GET` | `/ccar/forecast/hierarchy/{type}/{nodeId}/children` | Bearer | Direct children of one node | `200` array |
 | `POST` | `/ccar/forecast/hierarchy/{type}/reload` | Bearer | Reload that hierarchy from KDB+ | `200 {type, table, loaded, nodes, loadedAt}` |
+| `GET` | `/ccar/v1/portfolios` | Bearer | Portfolios, `ALL` first | `200 [{id, name}]` |
+| `GET` | `/ccar/v1/t0-dates` | Bearer | T0 dates with data, latest first | `200 ["2026-09-30", …]` |
+| `GET` | `/ccar/v1/hierarchy/root/{type}` | Bearer | Whole `BU` / `GEO` hierarchy, flat, root first | `200 [{id, name, level, parentId, childCount, isLeafNode}]` |
+| `POST` | `/ccar/v1/hierarchy/{type}/reload` | Bearer | Reload ccar-forecasting-service's cached hierarchy | `200 {type, nodes}` |
+| `GET` | `/ccar/v1/{forecast\|actuals\|variance}/aggregate-summary?hierarchyType&hierarchyId&portfolioId&t0Date` | Bearer | Totals of one node per account and period | `200 {scope, t0Date, portfolioId, currency, periods, period_values}` |
+| `GET` | `/ccar/v1/{forecast\|actuals\|variance}/detailed-breakdown?…&page&size` | Bearer | Same for a page of the node's direct children | `200 {scope, …, page, size, totalElements, totalPages, items[{id, name, hType, level, childCount, data_rows}]}` |
+
+`GET /ccar/v1/hierarchy/child/{type}` (lazy loading) is a planned enhancement; for now `root/{type}` returns the
+whole hierarchy.
 
 Request bodies:
 
@@ -506,6 +618,10 @@ Request bodies:
 | `GET` | `http://localhost:8081/ccar/kdb/health` | KDB connectivity and pool counts |
 | `GET` | `http://localhost:8081/ccar/kdb/metrics` | Host, active/idle connections, waiting threads, utilization % |
 | `GET` | `http://localhost:8081/ccar/swagger-ui.html` | OpenAPI / Swagger UI for ccar-hierarchy-service |
+| `GET` | `http://localhost:8083/ccar/kdb/health` | KDB connectivity of ccar-forecasting-service |
+| `GET` | `http://localhost:8083/ccar/kdb/metrics` | KDB pool metrics of ccar-forecasting-service |
+| `GET` | `http://localhost:8083/ccar/swagger-ui.html` | OpenAPI / Swagger UI for ccar-forecasting-service |
+
 Calling the services directly skips JWT validation. Use the gateway for anything other than local debugging.
 
 > `spring.h2.console.enabled=true` is set in user-service, but Spring Boot 4 serves `/h2-console` only when the
@@ -518,8 +634,9 @@ Calling the services directly skips JWT validation. Use the gateway for anything
 | any protected path | `401 UNAUTHORIZED` / `TOKEN_EXPIRED` / `TOKEN_INVALID` |
 | any path | `404 ROUTE_NOT_FOUND` (gateway), `503 DOWNSTREAM_UNAVAILABLE`, `504 DOWNSTREAM_TIMEOUT`, `503 CIRCUIT_OPEN`, `500 INTERNAL_ERROR` |
 | `/users…` | `400 VALIDATION_FAILED` / `MALFORMED_REQUEST` / `INVALID_PARAMETER`, `401 INVALID_CREDENTIALS`, `404 USER_NOT_FOUND`, `409 DUPLICATE_EMAIL` / `CONFLICT`, `503 SERVICE_UNAVAILABLE` |
-| `/ccar/forecast/forecast-ccar` | `503 KDB_UNAVAILABLE` / `KDB_POOL_EXHAUSTED`, `504 KDB_TIMEOUT`, `502 KDB_QUERY_FAILED` |
-| `/ccar/forecast/hierarchy…` | the KDB errors above, `400 INVALID_PARAMETER` (bad `type`, `depth` or id), `404 HIERARCHY_NOT_FOUND` (unknown type), `404 HIERARCHY_NODE_NOT_FOUND`, `503 HIERARCHY_UNAVAILABLE`, `500 HIERARCHY_INVALID` |
+| other `/ccar/forecast/…` paths (incl. the removed `forecast-ccar`) | `404 RESOURCE_NOT_FOUND` |
+| `/ccar/v1/…` | `400 INVALID_PARAMETER` (bad or missing `hierarchyType`, `hierarchyId`, `t0Date`, `portfolioId`, `page`, `size`), `404 HIERARCHY_NOT_FOUND` (type not configured), `404 HIERARCHY_NODE_NOT_FOUND`, `404 RESOURCE_NOT_FOUND` (unknown data set or path), `500 HIERARCHY_INVALID`, `503 KDB_UNAVAILABLE` / `KDB_POOL_EXHAUSTED`, `504 KDB_TIMEOUT`, `502 KDB_QUERY_FAILED` (q error, missing table, unexpected table layout) |
+| `/ccar/forecast/hierarchy…` | `503 KDB_UNAVAILABLE` / `KDB_POOL_EXHAUSTED`, `504 KDB_TIMEOUT`, `502 KDB_QUERY_FAILED` (load / reload), `400 INVALID_PARAMETER` (bad `type`, `depth` or id), `404 HIERARCHY_NOT_FOUND` (unknown type), `404 HIERARCHY_NODE_NOT_FOUND`, `503 HIERARCHY_UNAVAILABLE`, `500 HIERARCHY_INVALID` |
 
 ## Errors and tracing
 
@@ -528,7 +645,7 @@ Calling the services directly skips JWT validation. Use the gateway for anything
   validation). Details never include queries, hosts, SQL or stack traces.
 - **Correlation id.** Send `X-Correlation-Id` (letters, digits, `.`, `_`, `:`, `-`, up to 128 chars) or let the
   gateway create one. It is forwarded to the service, written on every log line
-  (`[correlationId]` in ccar-hierarchy-service and user-service, `[id]` prefix in the gateway), returned in the response
+  (`[correlationId]` in ccar-hierarchy-service, user-service and forecasting-service, `[id]` prefix in the gateway), returned in the response
   header and put in the error body.
 - **Logged once.** 5xx errors are logged at ERROR with the stack trace, 4xx as one WARN line, by the
   service's global exception handler.
@@ -543,6 +660,8 @@ Full details: [ERROR_HANDLING.md](ERROR_HANDLING.md).
 |---|---|---|
 | `ccar.gateway.services.ccar-hierarchy-service.uri` | `http://localhost:8081` | ccar-hierarchy-service base URL |
 | `ccar.gateway.services.ccar-hierarchy-service.response-timeout-ms` | `35000` | Response timeout for ccar-hierarchy-service |
+| `ccar.gateway.services.ccar-forecasting-service.uri` | `http://localhost:8083` | ccar-forecasting-service base URL |
+| `ccar.gateway.services.ccar-forecasting-service.response-timeout-ms` | `35000` | Response timeout for ccar-forecasting-service |
 | `ccar.gateway.services.user-service.uri` | `http://localhost:8082` | user-service base URL |
 | `ccar.gateway.services.user-service.response-timeout-ms` | `10000` | Response timeout for user-service |
 | `spring.cloud.gateway.httpclient.connect-timeout` | `2000` | Connect timeout (ms) |
@@ -565,6 +684,23 @@ Full details: [ERROR_HANDLING.md](ERROR_HANDLING.md).
 | `ccar.errors.retry-after-seconds` | `30` | `Retry-After` on KDB 503s |
 | `kdb.logging.slow-query-threshold-ms` | `1000` | Slow-query WARN threshold |
 
+**ccar-forecasting-service** (`kdb.*` as for ccar-hierarchy-service)
+
+| Property | Default | Meaning |
+|---|---|---|
+| `ccar.forecasting.datasets.{forecast,actuals,variance}.table` | `CCAR_FORECAST`, `CCAR_ACTUALS`, `CCAR_VARIANCE` | Fact table of each data set |
+| `ccar.forecasting.reference-table` | `CCAR_FORECAST` | Source of portfolios and T0 dates |
+| `ccar.forecasting.fact.account-column` / `portfolio-column` / `t0-date-column` | `ACCOUNT_ID` / `PORTFOLIO_ID` / `T0_DATE` | Fact table columns |
+| `ccar.forecasting.fact.t0-column` / `period-column-prefix` | `T0` / `T_` | Period columns: `T0`, `T_1` .. `T_<period-count>` |
+| `ccar.forecasting.period-count` | `36` | Periods after T0 |
+| `ccar.forecasting.accounts[i].id` / `.measure` | `210001` Balance, `400001` Revenue, `500001` Expense | Measures, in display order (others found in the data are appended) |
+| `ccar.forecasting.hierarchy.types.<TYPE>.table` | `<TYPE>_HIERARCHY` | Hierarchy table (`BU` and `GEO` are configured; other types → 404) |
+| `ccar.forecasting.hierarchy.types.<TYPE>.column-prefix` | `<TYPE>` | `<P>_ID`, `<P>_NAME`, `<P>_ID_LEVELn` |
+| `ccar.forecasting.hierarchy.types.<TYPE>.fact-column` | `<P>_ID` | Fact column holding the node id (`BU_ID`, `GEO_ID`) |
+| `ccar.forecasting.all-portfolios-id` | `ALL` | Portfolio id meaning "no filter" |
+| `ccar.forecasting.currency` | `USD` | Currency returned with the data (no FX conversion is done) |
+| `ccar.forecasting.default-page-size` / `max-page-size` | `25` / `500` | Breakdown paging |
+
 **ccar-user-service**
 
 | Property | Default | Meaning |
@@ -575,9 +711,14 @@ Full details: [ERROR_HANDLING.md](ERROR_HANDLING.md).
 
 ## Known gaps
 
-- The UI now signs in and goes through the gateway (:8089), but its data calls use paths such as
-  `/ccar/bu/hierarchy` that are not routed by the gateway or implemented in ccar-hierarchy-service yet, so with
-  `VITE_USE_MOCK=false` those screens show "endpoint not found" after signing in.
+- The UI's data calls still use the older proposed paths (`/ccar/bu/hierarchy`, `/ccar/forecast`, …); they need
+  to move to the `/ccar/v1/…` endpoints of ccar-forecasting-service.
+- The fact tables `CCAR_FORECAST`, `CCAR_ACTUALS` and `CCAR_VARIANCE` do not exist in the shared KDB+ yet
+  (only sample data from `CCAR_FACT_TABLES_LOAD.q`), and `GEO_HIERARCHY` is not loaded there either. The existing
+  `forecast_ccar` table has no BU/GEO column, so it cannot be aggregated by hierarchy.
+- Values are summed as stored and labelled with `ccar.forecasting.currency`; there is no FX conversion.
+- Variance is read from `CCAR_VARIANCE`, not computed from forecast and actuals.
+- Portfolio names are their ids (there is no portfolio reference table).
 - Seeded users in `data.sql` cannot log in (SHA-256 hashes vs BCrypt); register new users instead.
 - H2 is in memory: users are lost when user-service restarts.
 - Single instances with fixed URLs; no service discovery or scaling.

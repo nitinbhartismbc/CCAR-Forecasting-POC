@@ -1,57 +1,60 @@
 package com.ccar.forecasting.controller;
 
-import com.ccar.forecasting.dto.ForecastRequest;
-import com.ccar.forecasting.model.Forecast;
-import com.ccar.forecasting.model.Scenario;
+import com.ccar.forecasting.model.AggregateSummary;
+import com.ccar.forecasting.model.DataSet;
+import com.ccar.forecasting.model.DetailedBreakdown;
 import com.ccar.forecasting.service.ForecastingService;
-import jakarta.validation.Valid;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
-import java.net.URI;
-import java.util.List;
+import java.time.LocalDate;
 
+/**
+ * Forecast, actuals and variance data of one hierarchy node (with context path: {@code /ccar/v1/...}):
+ * <ul>
+ *   <li>{@code GET /v1/{forecast|actuals|variance}/aggregate-summary} - totals of the node</li>
+ *   <li>{@code GET /v1/{forecast|actuals|variance}/detailed-breakdown} - a page of its direct children</li>
+ * </ul>
+ * Query parameters: {@code hierarchyType} (BU | GEO), {@code hierarchyId}, {@code portfolioId} (default ALL),
+ * {@code t0Date} (yyyy-MM-dd); the breakdown also takes {@code page} (0-based) and {@code size}.
+ */
 @RestController
-@RequestMapping("/forecasts")
+@RequestMapping(value = "/v1", produces = MediaType.APPLICATION_JSON_VALUE)
 public class ForecastingController {
 
-    private final ForecastingService forecastingService;
+    private static final String DATA_SET = "/{dataSet:forecast|actuals|variance}";
 
-    public ForecastingController(ForecastingService forecastingService) {
-        this.forecastingService = forecastingService;
+    private final ForecastingService service;
+
+    public ForecastingController(ForecastingService service) {
+        this.service = service;
     }
 
-    /** {@code GET /forecasts} or {@code GET /forecasts?scenario=ADVERSE}. */
-    @GetMapping
-    public List<Forecast> getForecasts(@RequestParam(required = false) Scenario scenario) {
-        return forecastingService.getForecasts(scenario);
+    @GetMapping(DATA_SET + "/aggregate-summary")
+    public AggregateSummary aggregateSummary(
+            @PathVariable String dataSet,
+            @RequestParam String hierarchyType,
+            @RequestParam long hierarchyId,
+            @RequestParam(required = false) String portfolioId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate t0Date) {
+        return service.aggregateSummary(DataSet.fromPath(dataSet), hierarchyType, hierarchyId, portfolioId, t0Date);
     }
 
-    @GetMapping("/{id}")
-    public Forecast getForecast(@PathVariable long id) {
-        return forecastingService.getForecast(id);
-    }
-
-    /** 201 Created with a {@code Location} header pointing at the new forecast. */
-    @PostMapping
-    public ResponseEntity<Forecast> createForecast(@Valid @RequestBody ForecastRequest request) {
-        Forecast created = forecastingService.createForecast(request);
-        URI location = ServletUriComponentsBuilder.fromCurrentRequest()
-                .path("/{id}").buildAndExpand(created.id()).toUri();
-        return ResponseEntity.created(location).body(created);
-    }
-
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> deleteForecast(@PathVariable long id) {
-        forecastingService.deleteForecast(id);
-        return ResponseEntity.noContent().build();
+    @GetMapping(DATA_SET + "/detailed-breakdown")
+    public DetailedBreakdown detailedBreakdown(
+            @PathVariable String dataSet,
+            @RequestParam String hierarchyType,
+            @RequestParam long hierarchyId,
+            @RequestParam(required = false) String portfolioId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate t0Date,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(required = false) Integer size) {
+        return service.detailedBreakdown(DataSet.fromPath(dataSet), hierarchyType, hierarchyId, portfolioId, t0Date,
+                page, size);
     }
 }

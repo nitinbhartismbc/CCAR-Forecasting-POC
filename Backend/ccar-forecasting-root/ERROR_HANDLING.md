@@ -1,6 +1,6 @@
 # Error handling & tracing
 
-All CCAR services (api-gateway, ccar-hierarchy-service, user-service) and the UI share one error contract and one
+All CCAR services (api-gateway, ccar-hierarchy-service, user-service, forecasting-service) and the UI share one error contract and one
 correlation id. The shared code is in the `ccar-common` module.
 
 ## Error format (RFC 9457 `application/problem+json`)
@@ -11,7 +11,7 @@ correlation id. The shared code is in the `ccar-common` module.
   "title": "Data store unavailable",
   "status": 503,
   "detail": "The forecasting data store is currently unavailable. Please retry shortly.",
-  "instance": "/ccar/forecast/forecast-ccar",
+  "instance": "/ccar/forecast/hierarchy/BU",
   "errorCode": "KDB_UNAVAILABLE",
   "correlationId": "5c1d0e7e-...",
   "service": "ccar",
@@ -50,7 +50,7 @@ throw new CcarException(ErrorCode.HIERARCHY_NODE_NOT_FOUND, "GEO node " + id + "
 Exception handling lives once, in ccar-common, and is auto-configured into every service; no service declares
 its own handler.
 
-* **Servlet services** (ccar-hierarchy-service, ccar-user-service): `com.ccar.common.web.GlobalExceptionHandler`
+* **Servlet services** (ccar-hierarchy-service, ccar-user-service, ccar-forecasting-service): `com.ccar.common.web.GlobalExceptionHandler`
   handles `CcarException`, every Spring MVC exception (bad JSON, wrong parameter type, 405, 415, unknown path,
   ...) and a catch-all 500. Before the 500 it offers the exception (and its causes) to the `CcarErrorMapper`
   beans, registered only when their library is present: `KdbErrorMapper`, `PersistenceErrorMapper`,
@@ -66,7 +66,7 @@ catch-log-rethrow in services.
 
 ## KDB layer (`kdb-client-starter`)
 
-| Failure | Exception | HTTP (ccar-hierarchy-service) | Connection |
+| Failure | Exception | HTTP (ccar-hierarchy-service, ccar-forecasting-service) | Connection |
 |---|---|---|---|
 | Pool max-wait exceeded | `KdbPoolExhaustedException` | 503 `KDB_POOL_EXHAUSTED` | - |
 | Cannot connect / login refused | `KdbConnectionException` | 503 `KDB_UNAVAILABLE` | - |
@@ -77,6 +77,13 @@ catch-log-rethrow in services.
 If a hierarchy (BU, GEO, ...) fails to load, its requests fail fast with `HIERARCHY_UNAVAILABLE` and
 `Retry-After` for `ccar.hierarchy.retry-interval-ms` instead of hitting KDB again. Each type backs off
 independently.
+
+ccar-forecasting-service has no back-off: a hierarchy that failed to load is retried on the next request, and a
+failed reload keeps serving the previous snapshot. Its forecast / actuals / variance queries raise the
+`KdbException`s above; a fact table with an unexpected layout (missing column, wrong type) is reported as
+502 `KDB_QUERY_FAILED`, and a broken hierarchy table as 500 `HIERARCHY_INVALID`. Request values are validated
+before they reach a q query (400 `INVALID_PARAMETER` with a `parameter` field: `hierarchyType`, `portfolioId`,
+`page`, `size`).
 
 ## Correlation id / tracing
 

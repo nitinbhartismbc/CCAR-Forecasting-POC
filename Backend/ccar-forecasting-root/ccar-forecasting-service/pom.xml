@@ -38,6 +38,16 @@
             <groupId>com.ccar</groupId>
             <artifactId>ccar-common</artifactId>
         </dependency>
+        <!-- Pooled KDB+ access (KdbTemplate); ccar-common maps its KdbExceptions to 502/503/504 -->
+        <dependency>
+            <groupId>com.iris.kdb</groupId>
+            <artifactId>kdb-starter</artifactId>
+        </dependency>
+        <!-- Swagger UI at /ccar/swagger-ui.html -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+        </dependency>
 
         <!-- Test -->
         <dependency>

@@ -6,10 +6,10 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
 @SpringBootApplication
 @ConfigurationPropertiesScan
-public class CcarApplication {
+public class CcarHierarchyServiceApplication {
 
 	public static void main(String[] args) throws Exception {
-		SpringApplication.run(CcarApplication.class, args);
+		SpringApplication.run(CcarHierarchyServiceApplication.class, args);
 	}
 
 }
