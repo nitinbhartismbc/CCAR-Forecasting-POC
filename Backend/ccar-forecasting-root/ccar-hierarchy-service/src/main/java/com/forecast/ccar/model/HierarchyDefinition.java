@@ -7,12 +7,12 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
- * Where and how one hierarchy type is stored in KDB+. Every hierarchy table has the same flat layout, only the
- * names differ:
+ * Where and how one hierarchy type is stored in KDB+. Every hierarchy table has the same parent-pointer layout,
+ * only the names differ (extra columns such as {@code CHILD_COUNT} are ignored, child counts are computed):
  * <pre>
- *   &lt;PREFIX&gt;_ID, &lt;PREFIX&gt;_NAME, LEVEL_ID, &lt;PREFIX&gt;_ID_LEVEL1 .. &lt;PREFIX&gt;_ID_LEVELn
- *   BU : BU_HIERARCHY  -> BU_ID,  BU_NAME,  LEVEL_ID, BU_ID_LEVEL1 ..
- *   GEO: GEO_HIERARCHY -> GEO_ID, GEO_NAME, LEVEL_ID, GEO_ID_LEVEL1 ..
+ *   &lt;PREFIX&gt;_ID, &lt;PREFIX&gt;_NAME, LEVEL_ID, PARENT_&lt;PREFIX&gt;_ID
+ *   BU : BU_HIER  -> BU_ID,  BU_NAME,  LEVEL_ID, PARENT_BU_ID
+ *   GEO: GEO_HIER -> GEO_ID, GEO_NAME, LEVEL_ID, PARENT_GEO_ID
  * </pre>
  * By convention type {@code XYZ} lives in table {@code XYZ_HIERARCHY} with column prefix {@code XYZ}; both can be
  * overridden per type with {@code ccar.hierarchy.types.<TYPE>.table / .column-prefix}.
@@ -22,10 +22,10 @@ import java.util.regex.Pattern;
  * @param idColumn          node id column, e.g. {@code BU_ID}
  * @param nameColumn        node name column, e.g. {@code BU_NAME}
  * @param levelColumn       level column ({@code LEVEL_ID}, 1 = root)
- * @param levelColumnPrefix prefix of the path columns, e.g. {@code BU_ID_LEVEL} (+ level number)
+ * @param parentColumn      parent node id column, e.g. {@code PARENT_BU_ID} (ignored for the root, level 1)
  */
 public record HierarchyDefinition(String type, String table, String idColumn, String nameColumn, String levelColumn,
-                                  String levelColumnPrefix) {
+                                  String parentColumn) {
 
     public static final String LEVEL_COLUMN = "LEVEL_ID";
     public static final String TABLE_SUFFIX = "_HIERARCHY";
@@ -49,7 +49,7 @@ public record HierarchyDefinition(String type, String table, String idColumn, St
         if (!IDENTIFIER.matcher(prefix).matches()) {
             throw new IllegalArgumentException("Invalid column prefix for hierarchy " + t + ": " + prefix);
         }
-        return new HierarchyDefinition(t, tbl, prefix + "_ID", prefix + "_NAME", LEVEL_COLUMN, prefix + "_ID_LEVEL");
+        return new HierarchyDefinition(t, tbl, prefix + "_ID", prefix + "_NAME", LEVEL_COLUMN, "PARENT_" + prefix + "_ID");
     }
 
     /**

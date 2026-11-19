@@ -33,7 +33,7 @@ public class HierarchyProperties {
         /** KDB table; default {@code <TYPE>_HIERARCHY}. */
         private String table;
 
-        /** Column prefix ({@code <PREFIX>_ID}, {@code <PREFIX>_NAME}, {@code <PREFIX>_ID_LEVELn}); default the type. */
+        /** Column prefix ({@code <PREFIX>_ID}, {@code <PREFIX>_NAME}, {@code PARENT_<PREFIX>_ID}); default the type. */
         private String columnPrefix;
 
         public String getTable() {

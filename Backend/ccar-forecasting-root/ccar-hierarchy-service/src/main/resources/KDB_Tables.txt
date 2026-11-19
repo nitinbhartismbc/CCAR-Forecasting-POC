@@ -1,8 +1,14 @@
 h "forecast_ccar:flip (`OP_CODE_ID`ACCOUNT_ID`CCY_CODE`PORTFOLIO_ID`T0_DATE,`T0,`$T_,/:string 1+til 36)!(10000001 10000001 10000001;210001 400001 500001;`CHF`CHF`CHF;`PORT_0001`PORT_0001`PORT_0001;3#2025.12.31),flip 100000 1000 10000+\\:til 37"
 
 Use this in case of CREATING or MODIFYING query from the CMD/PuttY
-h:hopen `:192.168.11.200:5000
+h:hopen `:192.168.11.200:5173
 
 BU_HIERARCHY:("JSJJJJJJJJJJJ"; enlist ",") 0: `:BU_HIERARCHY1.csv
 
+GEO_HIERARCHY:("JSLII"; enlist ",") 0: `:GEO_HIERARCHY.csv
+
 FORECAST_DATA:("JSJSJSDJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJ";enlist ",") 0: `:FORECAST_DATA.csv
+
+/home/test/vivektraining/Silver_layer/Data
+
+h "GEO_HIERARCHY:(\"JSLJJ\"; enlist \",\") 0: `:/home/test/vivektraining/Silver_layer/Data/GEO_HIER.csv"

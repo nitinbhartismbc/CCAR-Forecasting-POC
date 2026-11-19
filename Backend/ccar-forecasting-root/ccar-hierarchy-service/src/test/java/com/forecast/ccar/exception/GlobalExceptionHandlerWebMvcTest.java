@@ -153,7 +153,7 @@ class GlobalExceptionHandlerWebMvcTest {
     void invalidHierarchyData_is500WithGenericDetail() throws Exception {
         when(hierarchyService.getHierarchy(anyString(), any())).thenThrow(new CcarException(ErrorCode.HIERARCHY_INVALID,
                 "The BU hierarchy data is invalid and could not be loaded.",
-                new IllegalStateException("Invalid BU hierarchy row 6: BU_ID_LEVEL2 is null")));
+                new IllegalStateException("Invalid BU hierarchy row 6: PARENT_BU_ID is null")));
 
         mvc.perform(get("/forecast/hierarchy/BU"))
                 .andExpect(status().isInternalServerError())

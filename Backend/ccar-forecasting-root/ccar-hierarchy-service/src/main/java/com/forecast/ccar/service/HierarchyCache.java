@@ -25,9 +25,9 @@ import java.util.Optional;
  * Loads ONE hierarchy (BU, GEO, ...) from its KDB table, builds a tree of {@link HierarchyNode}s and keeps it
  * cached in memory. {@link HierarchyService} holds one cache per hierarchy type.
  * <p>
- * Table layout (names from the {@link HierarchyDefinition}): {@code <P>_ID, <P>_NAME, LEVEL_ID,
- * <P>_ID_LEVEL1 .. <P>_ID_LEVELn}. Each row carries the full path from the root, so the parent of a level-N node
- * is the value in {@code <P>_ID_LEVEL(N-1)}. Rows are kept in table order, which determines sibling order.
+ * Table layout (names from the {@link HierarchyDefinition}): {@code <P>_ID, <P>_NAME, LEVEL_ID, PARENT_<P>_ID}.
+ * The root is the row with {@code LEVEL_ID = 1} (its parent value is ignored); every other row must have a
+ * non-null parent id. Rows are kept in table order, which determines sibling order.
  * <p>
  * The cached tree is published as an immutable snapshot (children lists are unmodifiable), so it is safe to read
  * concurrently and can be swapped atomically via {@link #reload()}.
@@ -177,6 +177,7 @@ class HierarchyCache {
         Object ids = requireColumn(columns, def.idColumn(), def);
         Object names = requireColumn(columns, def.nameColumn(), def);
         Object levels = requireColumn(columns, def.levelColumn(), def);
+        Object parents = requireColumn(columns, def.parentColumn(), def);
 
         int rowCount = Array.getLength(ids);
         if (rowCount == 0) {
@@ -191,8 +192,7 @@ class HierarchyCache {
                 int levelId = Math.toIntExact(requireLong(c.at(levels, row), def.levelColumn()));
                 Long parentId = null;
                 if (levelId > 1) {
-                    String parentCol = def.levelColumnPrefix() + (levelId - 1);
-                    parentId = requireLong(c.at(requireColumn(columns, parentCol, def), row), parentCol);
+                    parentId = requireLong(c.at(parents, row), def.parentColumn());
                 }
 
                 HierarchyNode previous = byId.put(id, new HierarchyNode(id, name, levelId, parentId));

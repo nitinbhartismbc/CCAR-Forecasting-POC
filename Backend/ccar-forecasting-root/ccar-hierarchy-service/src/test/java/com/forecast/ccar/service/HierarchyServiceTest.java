@@ -137,7 +137,7 @@ class HierarchyServiceTest {
         cfg.setColumnPrefix("GEO");
         p.getTypes().put("REGION", cfg);
         HierarchyDefinition region = new HierarchyDefinition("REGION", "REGION_TREE", "GEO_ID", "GEO_NAME",
-                "LEVEL_ID", "GEO_ID_LEVEL");
+                "LEVEL_ID", "PARENT_GEO_ID");
         HierarchyService service = new HierarchyService(new FakeKdb(region), p);
 
         assertEquals(6, service.reload("REGION").nodes());

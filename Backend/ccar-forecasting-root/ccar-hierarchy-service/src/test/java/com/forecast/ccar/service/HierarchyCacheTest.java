@@ -23,22 +23,20 @@ class HierarchyCacheTest {
     static final HierarchyDefinition BU = HierarchyDefinition.of("BU", "BU_HIERARCHY", null);
     static final HierarchyDefinition GEO = HierarchyDefinition.of("GEO", "GEO_HIERARCHY", null);
 
-    /** Rows: ID, NAME, LEVEL_ID, ID_LEVEL1..4 (remaining levels are null). */
+    /** Rows: ID, NAME, LEVEL_ID, PARENT_ID (null for the root), CHILD_COUNT (ignored by the loader). */
     static final Object[][] ROWS = {
-            {1L, "ALL_BANK", 1L, 1L, NULL, NULL, NULL},
-            {2L, "North America", 2L, 1L, 2L, NULL, NULL},
-            {30L, "Europe", 2L, 1L, 30L, NULL, NULL},
-            {3L, "United States", 3L, 1L, 2L, 3L, NULL},
-            {5L, "Deposits", 4L, 1L, 2L, 3L, 5L},
-            {4L, "Cards", 4L, 1L, 2L, 3L, 4L},
+            {1L, "ALL_BANK", 1L, NULL, 2L},
+            {2L, "North America", 2L, 1L, 1L},
+            {30L, "Europe", 2L, 1L, 0L},
+            {3L, "United States", 3L, 2L, 2L},
+            {5L, "Deposits", 4L, 3L, 0L},
+            {4L, "Cards", 4L, 3L, 0L},
     };
 
     /** Builds a c.Flip shaped like a hierarchy table of {@code def} (names as symbols, ids as longs). */
     static c.Flip table(HierarchyDefinition def, Object[][] rows) {
-        List<String> cols = new ArrayList<>(List.of(def.idColumn(), def.nameColumn(), def.levelColumn()));
-        for (int l = 1; l <= 10; l++) {
-            cols.add(def.levelColumnPrefix() + l);
-        }
+        List<String> cols = new ArrayList<>(List.of(def.idColumn(), def.nameColumn(), def.levelColumn(),
+                def.parentColumn(), "CHILD_COUNT"));
         Object[] data = new Object[cols.size()];
         for (int col = 0; col < cols.size(); col++) {
             if (col == 1) {
@@ -102,6 +100,13 @@ class HierarchyCacheTest {
     }
 
     @Test
+    void parentMayAppearAfterChild() {
+        Object[][] rows = {ROWS[3], ROWS[0], ROWS[1]};
+        HierarchyNode root = build(BU, table(BU, rows));
+        assertEquals(3L, root.getChildren().get(0).getChildren().get(0).getId());
+    }
+
+    @Test
     void acceptsCharArrayNames() {
         c.Flip flip = table(BU, ROWS);
         String[] symbols = (String[]) flip.y[1];
@@ -132,10 +137,10 @@ class HierarchyCacheTest {
     @Test
     void rejectsRowWithMissingParent() {
         Object[][] bad = java.util.Arrays.copyOf(ROWS, ROWS.length + 1);
-        bad[ROWS.length] = new Object[]{9L, "Broken", 3L, 1L, NULL, NULL, NULL};
+        bad[ROWS.length] = new Object[]{9L, "Broken", 3L, NULL, 0L};
         IllegalStateException e = assertThrows(IllegalStateException.class, () -> build(GEO, table(GEO, bad)));
         assertTrue(e.getMessage().contains("row 6"), e.getMessage());
-        assertTrue(e.getMessage().contains("GEO_ID_LEVEL2"), e.getMessage());
+        assertTrue(e.getMessage().contains("PARENT_GEO_ID"), e.getMessage());
     }
 
     @Test
