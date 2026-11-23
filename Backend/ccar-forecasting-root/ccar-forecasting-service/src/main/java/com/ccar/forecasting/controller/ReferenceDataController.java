@@ -1,50 +1,49 @@
 package com.ccar.forecasting.controller;
 
-import com.ccar.forecasting.model.HierarchyNode;
 import com.ccar.forecasting.model.Portfolio;
-import com.ccar.forecasting.service.ForecastingService;
+import com.ccar.forecasting.service.ReferenceDataService;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
-import java.util.Map;
 
-/** Filters and hierarchy for the UI (with context path: {@code /ccar/v1/...}). */
+/**
+ * Reference data endpoints used to populate the UI's filters (with context path: {@code /ccar/v1/...}).
+ * <p>
+ * Backed by {@link ReferenceDataService}, which caches portfolios and T0 dates from KDB+ (fetched at startup).
+ */
 @RestController
 @RequestMapping(value = "/v1", produces = MediaType.APPLICATION_JSON_VALUE)
 public class ReferenceDataController {
 
-    private final ForecastingService service;
+    private final ReferenceDataService service;
 
-    public ReferenceDataController(ForecastingService service) {
+    /**
+     * @param service provides the (cached) portfolio and T0 date reference data
+     */
+    public ReferenceDataController(ReferenceDataService service) {
         this.service = service;
     }
 
-    /** {@code [{id, name}]}, "ALL" first. */
+    /**
+     * All portfolios available for filtering, with the synthetic "ALL" portfolio first.
+     *
+     * @return {@code [{id, name}, ...]}, "ALL" first
+     */
     @GetMapping("/portfolios")
     public List<Portfolio> portfolios() {
         return service.portfolios();
     }
 
-    /** {@code ["2025-12-31", ...]}, latest first. */
+    /**
+     * Every T0 date that has data, most recent first.
+     *
+     * @return {@code ["2025-12-31", ...]}, latest first
+     */
     @GetMapping("/t0-dates")
     public List<String> t0Dates() {
         return service.t0Dates();
-    }
-
-    /** Whole hierarchy, flat: {@code [{id, name, level, parentId, childCount, isLeafNode}]}. */
-    @GetMapping("/hierarchy/root/{type}")
-    public List<HierarchyNode> hierarchyRoot(@PathVariable String type) {
-        return service.hierarchy(type);
-    }
-
-    /** Re-reads the hierarchy table from KDB into the cache. */
-    @PostMapping("/hierarchy/{type}/reload")
-    public Map<String, Object> reloadHierarchy(@PathVariable String type) {
-        return Map.of("type", type.toUpperCase(java.util.Locale.ROOT), "nodes", service.reloadHierarchy(type));
     }
 }

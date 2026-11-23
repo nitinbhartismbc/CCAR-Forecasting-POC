@@ -1,6 +1,8 @@
 package com.ccar.forecasting.repository;
 
 import com.ccar.forecasting.config.ForecastingProperties;
+import com.ccar.forecasting.config.properties.DataSetTable;
+import com.ccar.forecasting.constant.ForecastingConstant;
 import com.ccar.forecasting.hierarchy.HierarchyDefinition;
 import com.ccar.forecasting.kdb.FlipReader;
 import com.ccar.forecasting.kdb.QIdentifiers;
@@ -45,31 +47,27 @@ public class FactDataRepository {
     static final String COUNT_PREFIX = "N__";
 
     private final KdbTemplate kdbTemplate;
-    private final ForecastingProperties.Fact fact;
     private final Map<DataSet, String> tables = new EnumMap<>(DataSet.class);
     /** Column of period n (0 = T0). */
     private final List<String> periodColumns;
 
     public FactDataRepository(KdbTemplate kdbTemplate, ForecastingProperties properties) {
         this.kdbTemplate = kdbTemplate;
-        this.fact = properties.getFact();
-        QIdentifiers.requireColumn(fact.getAccountColumn(), "fact.account-column");
-        QIdentifiers.requireColumn(fact.getPortfolioColumn(), "fact.portfolio-column");
-        QIdentifiers.requireColumn(fact.getT0DateColumn(), "fact.t0-date-column");
+        QIdentifiers.requireColumn(ForecastingConstant.FACT_ACCOUNT_COLUMN, "fact.account-column");
+        QIdentifiers.requireColumn(ForecastingConstant.FACT_PORTFOLIO_COLUMN, "fact.portfolio-column");
+        QIdentifiers.requireColumn(ForecastingConstant.FACT_T0_DATE_COLUMN, "fact.t0-date-column");
         for (DataSet ds : DataSet.values()) {
-            ForecastingProperties.DataSetTable cfg = properties.getDatasets().get(ds.path());
+            DataSetTable cfg = properties.getDatasets().get(ds.path());
             if (cfg == null || cfg.getTable() == null) {
                 throw new IllegalArgumentException("Missing ccar.forecasting.datasets." + ds.path() + ".table");
             }
             tables.put(ds, QIdentifiers.requireTable(cfg.getTable().trim(), "datasets." + ds.path()));
         }
-        if (properties.getPeriodCount() < 0) {
-            throw new IllegalArgumentException("ccar.forecasting.period-count must be >= 0");
-        }
-        List<String> cols = new ArrayList<>(properties.getPeriodCount() + 1);
-        cols.add(QIdentifiers.requireColumn(fact.getT0Column(), "fact.t0-column"));
-        for (int n = 1; n <= properties.getPeriodCount(); n++) {
-            cols.add(QIdentifiers.requireColumn(fact.getPeriodColumnPrefix() + n, "fact.period-column-prefix"));
+        List<String> cols = new ArrayList<>(ForecastingConstant.PERIOD_COUNT + 1);
+        cols.add(QIdentifiers.requireColumn(ForecastingConstant.FACT_T0_COLUMN, "fact.t0-column"));
+        for (int n = 1; n <= ForecastingConstant.PERIOD_COUNT; n++) {
+            cols.add(QIdentifiers.requireColumn(ForecastingConstant.FACT_PERIOD_COLUMN_PREFIX + n,
+                    "fact.period-column-prefix"));
         }
         this.periodColumns = List.copyOf(cols);
     }
@@ -112,12 +110,14 @@ public class FactDataRepository {
             q.append(col).append(":sum ").append(col).append(", ")
                     .append(COUNT_PREFIX).append(col).append(":sum not null ").append(col);
         }
-        q.append(" by ").append(NODE_COLUMN).append(", ").append(fact.getAccountColumn());
+        q.append(" by ").append(NODE_COLUMN).append(", ").append(ForecastingConstant.FACT_ACCOUNT_COLUMN);
 
         q.append(" from ej[`").append(h.factColumn()).append(";select from ").append(tables.get(dataSet))
-                .append(" where ").append(fact.getT0DateColumn()).append('=').append(QIdentifiers.date(t0Date));
+                .append(" where ").append(ForecastingConstant.FACT_T0_DATE_COLUMN).append('=')
+                .append(QIdentifiers.date(t0Date));
         if (portfolioId != null) {
-            q.append(", ").append(fact.getPortfolioColumn()).append('=').append(QIdentifiers.symbol(portfolioId));
+            q.append(", ").append(ForecastingConstant.FACT_PORTFOLIO_COLUMN).append('=')
+                    .append(QIdentifiers.symbol(portfolioId));
         }
         String ancestor = h.levelColumn(level);
         q.append(";select ").append(h.factColumn()).append(':').append(h.idColumn())
@@ -131,7 +131,7 @@ public class FactDataRepository {
     Map<Long, Map<String, Number[]>> read(c.Flip flip) {
         FlipReader table = new FlipReader(flip);
         Object nodes = table.column(NODE_COLUMN);
-        Object accounts = table.column(fact.getAccountColumn());
+        Object accounts = table.column(ForecastingConstant.FACT_ACCOUNT_COLUMN);
         int periods = periodColumns.size();
         Object[] sums = new Object[periods];
         Object[] counts = new Object[periods];

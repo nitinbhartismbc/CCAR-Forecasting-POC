@@ -6,10 +6,10 @@ import com.ccar.forecasting.model.AggregateSummary;
 import com.ccar.forecasting.model.BreakdownItem;
 import com.ccar.forecasting.model.DataSet;
 import com.ccar.forecasting.model.DetailedBreakdown;
-import com.ccar.forecasting.model.HierarchyNode;
 import com.ccar.forecasting.model.PeriodValues;
 import com.ccar.forecasting.model.Scope;
 import com.ccar.forecasting.service.ForecastingService;
+import com.ccar.forecasting.service.ReferenceDataService;
 import com.iris.kdb.exception.KdbTimeoutException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -49,6 +49,9 @@ class ForecastingControllerWebMvcTest {
     @MockitoBean
     private ForecastingService service;
 
+    @MockitoBean
+    private ReferenceDataService referenceDataService;
+
     @Test
     void aggregateSummary() throws Exception {
         when(service.aggregateSummary(DataSet.ACTUALS, "BU", 1, "ALL", T0)).thenReturn(
@@ -84,23 +87,10 @@ class ForecastingControllerWebMvcTest {
         verify(service).detailedBreakdown(eq(DataSet.FORECAST), eq("BU"), eq(1L), isNull(), eq(T0), eq(0), isNull());
     }
 
-    @Test
-    void hierarchyRootIsFlatWithLeafFlag() throws Exception {
-        when(service.hierarchy("BU")).thenReturn(List.of(new HierarchyNode(1, "ALL_BANK", 1, null, 1),
-                new HierarchyNode(2, "North America", 2, 1L, 0)));
-
-        mvc.perform(get("/v1/hierarchy/root/BU"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].parentId").value(nullValue()))
-                .andExpect(jsonPath("$[0].isLeafNode").value(false))
-                .andExpect(jsonPath("$[1].level").value(2))
-                .andExpect(jsonPath("$[1].parentId").value(1))
-                .andExpect(jsonPath("$[1].isLeafNode").value(true));
-    }
 
     @Test
     void portfoliosAndDates() throws Exception {
-        when(service.t0Dates()).thenReturn(List.of("2026-09-30", "2025-12-31"));
+        when(referenceDataService.t0Dates()).thenReturn(List.of("2026-09-30", "2025-12-31"));
         mvc.perform(get("/v1/t0-dates")).andExpect(jsonPath("$[1]").value("2025-12-31"));
     }
 

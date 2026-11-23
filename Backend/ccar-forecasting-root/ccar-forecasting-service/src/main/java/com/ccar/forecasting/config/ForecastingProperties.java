@@ -1,6 +1,14 @@
 package com.ccar.forecasting.config;
 
+import com.ccar.forecasting.config.properties.Account;
+import com.ccar.forecasting.config.properties.DataSetTable;
+import com.ccar.forecasting.config.properties.Hierarchy;
+import com.ccar.forecasting.config.properties.PortfolioMaster;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.validation.annotation.Validated;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -10,216 +18,43 @@ import java.util.Map;
 /**
  * {@code ccar.forecasting.*}: where the forecast / actuals / variance data lives in KDB and how it is shaped.
  * <p>
- * Every data set is one flat KDB table with this layout (column names configurable under {@code fact.*}):
+ * Every data set is one flat KDB table with this layout (fact column names are fixed, see
+ * {@link com.ccar.forecasting.constant.ForecastingConstant}):
  * <pre>
  *   BU_ID (j)  GEO_ID (j)  ACCOUNT_ID (j|s)  PORTFOLIO_ID (s)  T0_DATE (d)  T0  T_1 .. T_36 (j|f)
  * </pre>
  * One row per (leaf node, account, portfolio, T0 date). {@code BU_ID} / {@code GEO_ID} are the ids of the node the
  * row is booked against in each hierarchy (the {@code fact-column} of the hierarchy type). Values are summed in KDB
  * over every node under the requested one, using the {@code <PREFIX>_ID_LEVELn} path columns of the hierarchy table.
+ * <p>
+ * {@code @Validated} + Bean Validation annotations below make Spring fail fast at application startup
+ * (context refresh fails with a clear message) when required config is missing, rather than surfacing as an
+ * obscure {@code NullPointerException}/{@code IllegalArgumentException} the first time a repository uses it.
+ * <p>
+ * The nested configuration classes ({@link Account}, {@link DataSetTable}, {@link Hierarchy},
+ * {@code HierarchyType}, {@link PortfolioMaster}) live under {@code com.ccar.forecasting.config.properties}.
  */
+@Validated
 @ConfigurationProperties(prefix = "ccar.forecasting")
 public class ForecastingProperties {
 
-    /** Reporting currency returned with every data response (values are expected in this currency). */
-    private String currency = "USD";
-
-    /** Portfolio id meaning "all portfolios" (no portfolio filter). */
-    private String allPortfoliosId = "ALL";
-
-    /** Number of periods after T0: T+1..T+n (forecast) / T-1..T-n (actuals, variance). */
-    private int periodCount = 36;
-
-    private int defaultPageSize = 25;
-    private int maxPageSize = 500;
-
     /** Table that portfolios and T0 dates are read from. */
-    private String referenceTable = "CCAR_FORECAST";
+    @NotBlank
+    private String referenceTable = "Actuals";
 
-    /** Data set (forecast, actuals, variance) -> KDB table. */
-    private Map<String, DataSetTable> datasets = new LinkedHashMap<>();
+    /** Portfolio master table (id + display name). */
+    @Valid
+    private PortfolioMaster portfolioMaster = new PortfolioMaster();
 
-    private Fact fact = new Fact();
+    /** Data set (forecast, actuals, variance) -> KDB table. At least one must be configured. */
+    @NotEmpty
+    private Map<String, @Valid DataSetTable> datasets = new LinkedHashMap<>();
 
     /** Accounts (measures) in display order. */
-    private List<Account> accounts = new ArrayList<>();
+    private List<@Valid Account> accounts = new ArrayList<>();
 
+    @Valid
     private Hierarchy hierarchy = new Hierarchy();
-
-    public static class DataSetTable {
-        private String table;
-
-        public String getTable() {
-            return table;
-        }
-
-        public void setTable(String table) {
-            this.table = table;
-        }
-    }
-
-    public static class Fact {
-        private String accountColumn = "ACCOUNT_ID";
-        private String portfolioColumn = "PORTFOLIO_ID";
-        private String t0DateColumn = "T0_DATE";
-        private String t0Column = "T0";
-        private String periodColumnPrefix = "T_";
-
-        public String getAccountColumn() {
-            return accountColumn;
-        }
-
-        public void setAccountColumn(String accountColumn) {
-            this.accountColumn = accountColumn;
-        }
-
-        public String getPortfolioColumn() {
-            return portfolioColumn;
-        }
-
-        public void setPortfolioColumn(String portfolioColumn) {
-            this.portfolioColumn = portfolioColumn;
-        }
-
-        public String getT0DateColumn() {
-            return t0DateColumn;
-        }
-
-        public void setT0DateColumn(String t0DateColumn) {
-            this.t0DateColumn = t0DateColumn;
-        }
-
-        public String getT0Column() {
-            return t0Column;
-        }
-
-        public void setT0Column(String t0Column) {
-            this.t0Column = t0Column;
-        }
-
-        public String getPeriodColumnPrefix() {
-            return periodColumnPrefix;
-        }
-
-        public void setPeriodColumnPrefix(String periodColumnPrefix) {
-            this.periodColumnPrefix = periodColumnPrefix;
-        }
-    }
-
-    public static class Account {
-        private String id;
-        private String measure;
-
-        public Account() {
-        }
-
-        public Account(String id, String measure) {
-            this.id = id;
-            this.measure = measure;
-        }
-
-        public String getId() {
-            return id;
-        }
-
-        public void setId(String id) {
-            this.id = id;
-        }
-
-        public String getMeasure() {
-            return measure;
-        }
-
-        public void setMeasure(String measure) {
-            this.measure = measure;
-        }
-    }
-
-    public static class Hierarchy {
-        /** Supported hierarchy types (key = type, case-insensitive). */
-        private Map<String, HierarchyType> types = new LinkedHashMap<>();
-
-        public Map<String, HierarchyType> getTypes() {
-            return types;
-        }
-
-        public void setTypes(Map<String, HierarchyType> types) {
-            this.types = types;
-        }
-    }
-
-    public static class HierarchyType {
-        /** KDB table; default {@code <TYPE>_HIERARCHY}. */
-        private String table;
-        /** Column prefix of the hierarchy table; default the type. */
-        private String columnPrefix;
-        /** Fact-table column holding this hierarchy's node id; default {@code <PREFIX>_ID}. */
-        private String factColumn;
-
-        public String getTable() {
-            return table;
-        }
-
-        public void setTable(String table) {
-            this.table = table;
-        }
-
-        public String getColumnPrefix() {
-            return columnPrefix;
-        }
-
-        public void setColumnPrefix(String columnPrefix) {
-            this.columnPrefix = columnPrefix;
-        }
-
-        public String getFactColumn() {
-            return factColumn;
-        }
-
-        public void setFactColumn(String factColumn) {
-            this.factColumn = factColumn;
-        }
-    }
-
-    public String getCurrency() {
-        return currency;
-    }
-
-    public void setCurrency(String currency) {
-        this.currency = currency;
-    }
-
-    public String getAllPortfoliosId() {
-        return allPortfoliosId;
-    }
-
-    public void setAllPortfoliosId(String allPortfoliosId) {
-        this.allPortfoliosId = allPortfoliosId;
-    }
-
-    public int getPeriodCount() {
-        return periodCount;
-    }
-
-    public void setPeriodCount(int periodCount) {
-        this.periodCount = periodCount;
-    }
-
-    public int getDefaultPageSize() {
-        return defaultPageSize;
-    }
-
-    public void setDefaultPageSize(int defaultPageSize) {
-        this.defaultPageSize = defaultPageSize;
-    }
-
-    public int getMaxPageSize() {
-        return maxPageSize;
-    }
-
-    public void setMaxPageSize(int maxPageSize) {
-        this.maxPageSize = maxPageSize;
-    }
 
     public String getReferenceTable() {
         return referenceTable;
@@ -227,6 +62,14 @@ public class ForecastingProperties {
 
     public void setReferenceTable(String referenceTable) {
         this.referenceTable = referenceTable;
+    }
+
+    public PortfolioMaster getPortfolioMaster() {
+        return portfolioMaster;
+    }
+
+    public void setPortfolioMaster(PortfolioMaster portfolioMaster) {
+        this.portfolioMaster = portfolioMaster;
     }
 
     public Map<String, DataSetTable> getDatasets() {
@@ -237,13 +80,6 @@ public class ForecastingProperties {
         this.datasets = datasets;
     }
 
-    public Fact getFact() {
-        return fact;
-    }
-
-    public void setFact(Fact fact) {
-        this.fact = fact;
-    }
 
     public List<Account> getAccounts() {
         return accounts;

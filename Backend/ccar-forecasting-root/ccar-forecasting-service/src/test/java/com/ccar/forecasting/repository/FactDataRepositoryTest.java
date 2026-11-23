@@ -25,10 +25,15 @@ class FactDataRepositoryTest {
     void buildsAggregationQueryGroupedByAncestorAtLevel() {
         String q = repo.buildQuery(DataSet.FORECAST, BU, 2, List.of(2L, 109L), LocalDate.of(2026, 9, 30), "PORT_0001");
 
-        assertEquals("0!select T0:sum T0, N__T0:sum not null T0, T_1:sum T_1, N__T_1:sum not null T_1, "
-                + "T_2:sum T_2, N__T_2:sum not null T_2 by NODE__ID, ACCOUNT_ID "
-                + "from ej[`BU_ID;select from CCAR_FORECAST where T0_DATE=2026.09.30, PORTFOLIO_ID=`$\"PORT_0001\";"
-                + "select BU_ID:BU_ID, NODE__ID:BU_ID_LEVEL2 from BU_HIERARCHY where BU_ID_LEVEL2 in (),2 109]", q);
+        // full query covers all 37 periods (T0, T_1 .. T_36); spot-check its shape instead of the full text
+        assertTrue(q.startsWith("0!select T0:sum T0, N__T0:sum not null T0, "
+                + "T_1:sum T_1, N__T_1:sum not null T_1, "));
+        assertTrue(q.contains("T_36:sum T_36, N__T_36:sum not null T_36"));
+        assertTrue(q.contains(" by NODE__ID, ACCOUNT_ID "));
+        assertTrue(q.contains("from ej[`BU_ID;select from CCAR_FORECAST where T0_DATE=2026.09.30, "
+                + "PORTFOLIO_ID=`$\"PORT_0001\";"));
+        assertTrue(q.endsWith("select BU_ID:BU_ID, NODE__ID:BU_ID_LEVEL2 from BU_HIERARCHY "
+                + "where BU_ID_LEVEL2 in (),2 109]"));
     }
 
     @Test
@@ -42,32 +47,29 @@ class FactDataRepositoryTest {
 
     @Test
     void readsFlipAndTurnsPeriodsWithoutDataIntoNull() {
-        c.Flip flip = TestData.flip(
-                new String[]{"NODE__ID", "ACCOUNT_ID", "T0", "N__T0", "T_1", "N__T_1", "T_2", "N__T_2"},
+        c.Flip flip = TestData.wideFacts(
                 new long[]{2, 2, 109},
                 new long[]{210001, 400001, 210001},
-                new long[]{100, 5, 7},
-                new int[]{2, 1, 1},
-                new long[]{0, 6, 8},      // sum is 0 for node 2 / Balance because every value was null
-                new int[]{0, 1, 1},
-                new long[]{NJ, NJ, 9},    // a null sum is treated as no data as well
-                new int[]{0, 0, 1});
+                "T0", new long[]{100, 5, 7}, new int[]{2, 1, 1},
+                "T_1", new long[]{0, 6, 8}, new int[]{0, 1, 1},   // sum 0 for node 2/Balance: every value was null
+                "T_2", new long[]{NJ, NJ, 9}, new int[]{0, 0, 1}); // a null sum is treated as no data as well
 
         Map<Long, Map<String, Number[]>> totals = repo.read(flip);
 
-        assertArrayEquals(new Number[]{100L, null, null}, totals.get(2L).get("210001"));
-        assertArrayEquals(new Number[]{5L, 6L, null}, totals.get(2L).get("400001"));
-        assertArrayEquals(new Number[]{7L, 8L, 9L}, totals.get(109L).get("210001"));
+        assertArrayEquals(TestData.periods(100L), totals.get(2L).get("210001"));
+        assertArrayEquals(TestData.periods(5L, 6L), totals.get(2L).get("400001"));
+        assertArrayEquals(TestData.periods(7L, 8L, 9L), totals.get(109L).get("210001"));
     }
 
     @Test
     void symbolAccountIdsAndFloatValuesAreSupported() {
-        c.Flip flip = TestData.flip(
-                new String[]{"NODE__ID", "ACCOUNT_ID", "T0", "N__T0", "T_1", "N__T_1", "T_2", "N__T_2"},
+        c.Flip flip = TestData.wideFacts(
                 new long[]{1}, new String[]{"210001"},
-                new double[]{1.5}, new int[]{1}, new double[]{Double.NaN}, new int[]{0}, new double[]{2.5}, new int[]{1});
+                "T0", new double[]{1.5}, new int[]{1},
+                "T_1", new double[]{Double.NaN}, new int[]{0},
+                "T_2", new double[]{2.5}, new int[]{1});
 
-        assertArrayEquals(new Number[]{1.5, null, 2.5}, repo.read(flip).get(1L).get("210001"));
+        assertArrayEquals(TestData.periods(1.5, null, 2.5), repo.read(flip).get(1L).get("210001"));
     }
 
     @Test

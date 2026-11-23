@@ -1,9 +1,17 @@
 package com.ccar.forecasting;
 
 import com.ccar.forecasting.config.ForecastingProperties;
+import com.ccar.forecasting.config.properties.Account;
+import com.ccar.forecasting.config.properties.DataSetTable;
+import com.ccar.forecasting.config.properties.HierarchyType;
+import com.ccar.forecasting.constant.ForecastingConstant;
 import com.kx.c;
 
-/** Shared fixtures: a small BU hierarchy as KDB would return it, and properties with 2 periods (T0, T+-1, T+-2). */
+import java.lang.reflect.Array;
+import java.util.ArrayList;
+import java.util.List;
+
+/** Shared fixtures: a small BU hierarchy as KDB would return it, and properties with the fixed 36-period layout. */
 public final class TestData {
 
     public static final long NJ = Long.MIN_VALUE; // q long null 0Nj
@@ -13,6 +21,62 @@ public final class TestData {
 
     public static c.Flip flip(String[] cols, Object... data) {
         return new c.Flip(new c.Dict(cols, data));
+    }
+
+    /**
+     * Builds a fact-query result flip containing every column {@code FactDataRepository} expects
+     * ({@code NODE__ID, ACCOUNT_ID, T0, N__T0, T_1, N__T_1, ..., T_36, N__T_36}), using the given values for the
+     * periods actually supplied and nulls/zero-counts for every other period, so tests only need to spell out the
+     * periods they care about.
+     *
+     * @param nodeIds           {@code long[]} column
+     * @param accountIds        {@code long[]} or {@code String[]} column
+     * @param suppliedPeriodCols triples of {@code (periodColumnName, sumArray, countArray)}, e.g.
+     *                           {@code "T0", new long[]{1,2}, new int[]{1,1}}
+     */
+    public static c.Flip wideFacts(Object nodeIds, Object accountIds, Object... suppliedPeriodCols) {
+        int rows = Array.getLength(nodeIds);
+        List<String> colNames = new ArrayList<>();
+        List<Object> colData = new ArrayList<>();
+        colNames.add("NODE__ID");
+        colData.add(nodeIds);
+        colNames.add("ACCOUNT_ID");
+        colData.add(accountIds);
+
+        List<String> allPeriodCols = new ArrayList<>();
+        allPeriodCols.add("T0");
+        for (int n = 1; n <= ForecastingConstant.PERIOD_COUNT; n++) {
+            allPeriodCols.add("T_" + n);
+        }
+        for (String col : allPeriodCols) {
+            colNames.add(col);
+            colNames.add("N__" + col);
+            int idx = indexOf(suppliedPeriodCols, col);
+            if (idx >= 0) {
+                colData.add(suppliedPeriodCols[idx + 1]);
+                colData.add(suppliedPeriodCols[idx + 2]);
+            } else {
+                colData.add(new long[rows]); // ignored: N__ below is 0, so "no data"
+                colData.add(new int[rows]);  // N__ = 0 -> treated as "no data"
+            }
+        }
+        return flip(colNames.toArray(new String[0]), colData.toArray());
+    }
+
+    private static int indexOf(Object[] triples, String name) {
+        for (int i = 0; i < triples.length; i += 3) {
+            if (name.equals(triples[i])) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** {@code leading} values followed by nulls up to the fixed 37-period width (T0, T_1 .. T_36). */
+    public static Number[] periods(Number... leading) {
+        Number[] values = new Number[ForecastingConstant.PERIOD_COUNT + 1];
+        System.arraycopy(leading, 0, values, 0, leading.length);
+        return values;
     }
 
     /**
@@ -37,18 +101,15 @@ public final class TestData {
 
     public static ForecastingProperties properties() {
         ForecastingProperties p = new ForecastingProperties();
-        p.setPeriodCount(2);
-        p.setDefaultPageSize(25);
-        p.setMaxPageSize(100);
         for (String ds : new String[]{"forecast", "actuals", "variance"}) {
-            ForecastingProperties.DataSetTable t = new ForecastingProperties.DataSetTable();
+            DataSetTable t = new DataSetTable();
             t.setTable("CCAR_" + ds.toUpperCase());
             p.getDatasets().put(ds, t);
         }
-        p.getAccounts().add(new ForecastingProperties.Account("210001", "Balance"));
-        p.getAccounts().add(new ForecastingProperties.Account("400001", "Revenue"));
-        p.getAccounts().add(new ForecastingProperties.Account("500001", "Expense"));
-        ForecastingProperties.HierarchyType bu = new ForecastingProperties.HierarchyType();
+        p.getAccounts().add(new Account("210001", "Balance"));
+        p.getAccounts().add(new Account("400001", "Revenue"));
+        p.getAccounts().add(new Account("500001", "Expense"));
+        HierarchyType bu = new HierarchyType();
         bu.setTable("BU_HIERARCHY");
         p.getHierarchy().getTypes().put("BU", bu);
         return p;

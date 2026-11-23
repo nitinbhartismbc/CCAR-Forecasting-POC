@@ -176,8 +176,7 @@ The UI's data API: portfolios, T0 dates, the flat hierarchy, and forecast / actu
 hierarchy node, read from KDB+. Port **8083**, context path **`/ccar`**, all endpoints under **`/ccar/v1`**
 (gateway route `/ccar/v1/**`). Endpoints: [Forecasting data (/ccar/v1)](#forecasting-data-ccarv1).
 
-- `controller/ReferenceDataController`: `GET /v1/portfolios`, `GET /v1/t0-dates`,
-  `GET /v1/hierarchy/root/{type}`, `POST /v1/hierarchy/{type}/reload`.
+- `controller/ReferenceDataController`: `GET /v1/portfolios`, `GET /v1/t0-dates`.
 - `controller/ForecastingController`: `GET /v1/{forecast|actuals|variance}/aggregate-summary` and
   `.../detailed-breakdown`.
 - `service/ForecastingService`: turns the flat KDB results into the UI JSON. Every configured account (Balance,
@@ -185,7 +184,7 @@ hierarchy node, read from KDB+. Port **8083**, context path **`/ccar`**, all end
   Paging of the breakdown is done on the cached children, so KDB+ is only asked for the page shown.
 - `hierarchy/HierarchyRepository`: loads each configured hierarchy table (`ccar.forecasting.hierarchy.types.*`)
   once and caches it as an immutable snapshot (flat list + parent index). Warmed at startup; retried on the next
-  request after a failure; `POST /v1/hierarchy/{type}/reload` re-reads it.
+  request after a failure.
 - `repository/FactDataRepository`: builds one q query per request. Aggregation happens in KDB+: each fact row
   is joined (`ej`) to the hierarchy table on its node column and grouped by its ancestor at the requested level
   (`<P>_ID_LEVELn`), so a node's total covers its whole subtree. Each period also returns its count of non-null
@@ -515,10 +514,6 @@ curl -s http://localhost:8089/ccar/v1/portfolios -H "Authorization: Bearer $TOKE
 curl -s http://localhost:8089/ccar/v1/t0-dates -H "Authorization: Bearer $TOKEN"
 # ["2026-09-30","2026-06-30","2026-03-31","2025-12-31"]          latest first
 
-# the whole hierarchy as a flat list (root first); type = BU | GEO
-curl -s http://localhost:8089/ccar/v1/hierarchy/root/BU -H "Authorization: Bearer $TOKEN"
-# [{"id":1,"name":"ALL_BANK","level":1,"parentId":null,"childCount":5,"isLeafNode":false},
-#  {"id":2,"name":"North America","level":2,"parentId":1,"childCount":4,"isLeafNode":false}, ...]
 
 # totals of one node; replace forecast with actuals or variance (periods then run T0, T-1 .. T-36)
 curl -s "http://localhost:8089/ccar/v1/forecast/aggregate-summary?hierarchyType=BU&hierarchyId=1&portfolioId=ALL&t0Date=2026-09-30" \
@@ -566,8 +561,7 @@ curl -s "http://localhost:8089/ccar/v1/forecast/detailed-breakdown?hierarchyType
 ```
 
 Parameters: `hierarchyType` (`BU` | `GEO`, case-insensitive), `hierarchyId`, `t0Date` (`yyyy-MM-dd`) are required;
-`portfolioId` defaults to `ALL`. After a hierarchy table changes in KDB+, reload the service's cache with
-`POST /ccar/v1/hierarchy/{type}/reload`. Swagger UI: `http://localhost:8083/ccar/swagger-ui.html`.
+`portfolioId` defaults to `ALL`. Swagger UI: `http://localhost:8083/ccar/swagger-ui.html`.
 
 ### Postman
 

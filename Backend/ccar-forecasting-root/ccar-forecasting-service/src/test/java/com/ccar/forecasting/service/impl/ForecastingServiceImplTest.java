@@ -1,4 +1,4 @@
-package com.ccar.forecasting.service;
+package com.ccar.forecasting.service.impl;
 
 import com.ccar.common.error.CcarException;
 import com.ccar.common.error.ErrorCode;
@@ -8,11 +8,9 @@ import com.ccar.forecasting.hierarchy.HierarchyRepository;
 import com.ccar.forecasting.model.AggregateSummary;
 import com.ccar.forecasting.model.DataSet;
 import com.ccar.forecasting.model.DetailedBreakdown;
-import com.ccar.forecasting.model.HierarchyNode;
 import com.ccar.forecasting.model.PeriodValues;
-import com.ccar.forecasting.model.Portfolio;
 import com.ccar.forecasting.repository.FactDataRepository;
-import com.ccar.forecasting.repository.ReferenceDataRepository;
+import com.ccar.forecasting.service.ForecastingService;
 import com.iris.kdb.service.KdbTemplate;
 import com.kx.c;
 import org.junit.jupiter.api.Test;
@@ -24,23 +22,19 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-class ForecastingServiceTest {
+class ForecastingServiceImplTest {
 
     private static final LocalDate T0 = LocalDate.of(2026, 9, 30);
 
-    /** Fake KDB: the BU hierarchy, a fixed fact result, portfolios and dates; records every query. */
+    /** Fake KDB: the BU hierarchy and a fixed fact result; records every query. */
     private static final class FakeKdb extends KdbTemplate {
         final List<String> queries = new ArrayList<>();
-        c.Flip facts = TestData.flip(
-                new String[]{"NODE__ID", "ACCOUNT_ID", "T0", "N__T0", "T_1", "N__T_1", "T_2", "N__T_2"},
+        c.Flip facts = TestData.wideFacts(
                 new long[]{1, 1, 2},
                 new long[]{210001, 999999, 400001},
-                new long[]{8504978, 1, 31685},
-                new int[]{3, 1, 1},
-                new long[]{8516417, 2, 0},
-                new int[]{3, 1, 0},
-                new long[]{0, 3, 31700},
-                new int[]{0, 1, 1});
+                "T0", new long[]{8504978, 1, 31685}, new int[]{3, 1, 1},
+                "T_1", new long[]{8516417, 2, 0}, new int[]{3, 1, 0},
+                "T_2", new long[]{0, 3, 31700}, new int[]{0, 1, 1});
 
         FakeKdb() {
             super(null);
@@ -50,12 +44,6 @@ class ForecastingServiceTest {
         @SuppressWarnings("unchecked")
         public <T> T execute(String query) {
             queries.add(query);
-            if (query.startsWith("asc exec distinct PORTFOLIO_ID")) {
-                return (T) new String[]{"ALL", "PORT_0001", "PORT_0002"};
-            }
-            if (query.startsWith("desc exec distinct T0_DATE")) {
-                return (T) new LocalDate[]{LocalDate.of(2026, 9, 30), LocalDate.MIN, LocalDate.of(2025, 12, 31)};
-            }
             throw new IllegalArgumentException(query);
         }
 
@@ -69,8 +57,8 @@ class ForecastingServiceTest {
 
     private final FakeKdb kdb = new FakeKdb();
     private final ForecastingProperties props = TestData.properties();
-    private final ForecastingService service = new ForecastingService(new HierarchyRepository(kdb, props),
-            new FactDataRepository(kdb, props), new ReferenceDataRepository(kdb, props), props);
+    private final ForecastingService service = new ForecastingServiceImpl(new HierarchyRepository(kdb, props),
+            new FactDataRepository(kdb, props), props);
 
     @Test
     void aggregateSummaryHasEveryConfiguredMeasureInOrderWithNullsForMissingData() {
@@ -81,15 +69,16 @@ class ForecastingServiceTest {
         assertEquals(1, s.scope().level());
         assertEquals("ALL", s.portfolioId());
         assertEquals("USD", s.currency());
-        assertEquals(List.of("T0", "T+1", "T+2"), s.periods());
+        assertEquals(37, s.periods().size()); // T0, T+1 .. T+36
+        assertEquals(List.of("T0", "T+1", "T+2"), s.periods().subList(0, 3));
 
         List<PeriodValues> rows = s.periodValues();
         assertEquals(List.of("210001", "400001", "500001", "999999"),
                 rows.stream().map(PeriodValues::accountId).toList());
         assertEquals(List.of("Balance", "Revenue", "Expense", "999999"),
                 rows.stream().map(PeriodValues::measure).toList());
-        assertEquals(Arrays.asList(8504978L, 8516417L, null), rows.get(0).values());
-        assertEquals(Arrays.asList(null, null, null), rows.get(1).values()); // no data for Revenue on node 1
+        assertEquals(Arrays.asList(8504978L, 8516417L, null), rows.get(0).values().subList(0, 3));
+        assertEquals(Arrays.asList(null, null, null), rows.get(1).values().subList(0, 3)); // no data for Revenue
         assertTrue(kdb.queries.stream().anyMatch(q -> q.contains("where BU_ID_LEVEL1 in (),1]")));
         assertTrue(kdb.queries.stream().noneMatch(q -> q.contains("PORTFOLIO_ID=")));
     }
@@ -97,9 +86,9 @@ class ForecastingServiceTest {
     @Test
     void actualsAndVarianceLookBackwards() {
         assertEquals(List.of("T0", "T-1", "T-2"),
-                service.aggregateSummary(DataSet.ACTUALS, "BU", 1, null, T0).periods());
+                service.aggregateSummary(DataSet.ACTUALS, "BU", 1, null, T0).periods().subList(0, 3));
         AggregateSummary v = service.aggregateSummary(DataSet.VARIANCE, "BU", 1, "port_0001", T0);
-        assertEquals(List.of("T0", "T-1", "T-2"), v.periods());
+        assertEquals(List.of("T0", "T-1", "T-2"), v.periods().subList(0, 3));
         assertTrue(kdb.queries.stream().anyMatch(q -> q.contains("from CCAR_VARIANCE where T0_DATE=2026.09.30, "
                 + "PORTFOLIO_ID=`$\"port_0001\"")));
     }
@@ -117,7 +106,7 @@ class ForecastingServiceTest {
         assertEquals("BU", item.hType());
         assertEquals(2, item.level());
         assertEquals(2, item.childCount());
-        assertEquals(Arrays.asList(31685L, null, 31700L), item.dataRows().get(1).values());
+        assertEquals(Arrays.asList(31685L, null, 31700L), item.dataRows().get(1).values().subList(0, 3));
         assertTrue(kdb.queries.get(kdb.queries.size() - 1).contains("where BU_ID_LEVEL2 in (),2]"));
 
         DetailedBreakdown page1 = service.detailedBreakdown(DataSet.FORECAST, "BU", 1, "ALL", T0, 1, 1);
@@ -143,24 +132,6 @@ class ForecastingServiceTest {
     }
 
     @Test
-    void hierarchyIsFlatWithParentsChildCountsAndLeafFlags() {
-        List<HierarchyNode> nodes = service.hierarchy("BU");
-
-        assertEquals(6, nodes.size());
-        assertEquals(new HierarchyNode(1, "ALL_BANK", 1, null, 2), nodes.get(0));
-        assertEquals(new HierarchyNode(110, "United Kingdom", 3, 109L, 0), nodes.get(5));
-        assertTrue(nodes.get(5).isLeafNode());
-        assertFalse(nodes.get(0).isLeafNode());
-    }
-
-    @Test
-    void portfoliosStartWithAllAndDatesDropNulls() {
-        assertEquals(List.of(new Portfolio("ALL", "All Portfolios"), new Portfolio("PORT_0001", "PORT_0001"),
-                new Portfolio("PORT_0002", "PORT_0002")), service.portfolios());
-        assertEquals(List.of("2026-09-30", "2025-12-31"), service.t0Dates());
-    }
-
-    @Test
     void errors() {
         assertCode(ErrorCode.HIERARCHY_NODE_NOT_FOUND,
                 () -> service.aggregateSummary(DataSet.FORECAST, "BU", 42, "ALL", T0));
@@ -173,8 +144,9 @@ class ForecastingServiceTest {
         assertCode(ErrorCode.INVALID_PARAMETER,
                 () -> service.detailedBreakdown(DataSet.FORECAST, "BU", 1, "ALL", T0, -1, 10));
         assertCode(ErrorCode.INVALID_PARAMETER,
-                () -> service.detailedBreakdown(DataSet.FORECAST, "BU", 1, "ALL", T0, 0, 101));
+                () -> service.detailedBreakdown(DataSet.FORECAST, "BU", 1, "ALL", T0, 0, 501));
     }
+
 
     private int countFactQueries() {
         return (int) kdb.queries.stream().filter(q -> q.startsWith("0!select T0")).count();
