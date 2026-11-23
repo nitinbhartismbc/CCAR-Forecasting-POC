@@ -4,7 +4,8 @@ import com.ccar.common.error.CcarException;
 import com.ccar.common.error.ErrorCode;
 import com.ccar.forecasting.config.ForecastingProperties;
 import com.ccar.forecasting.constant.ForecastingConstant;
-import com.ccar.forecasting.hierarchy.Hierarchy;
+import com.ccar.forecasting.hierarchy.HierarchyDefinition;
+import com.ccar.forecasting.hierarchy.HierarchyNodeView;
 import com.ccar.forecasting.hierarchy.HierarchyRepository;
 import com.ccar.forecasting.kdb.QIdentifiers;
 import com.ccar.forecasting.model.AggregateSummary;
@@ -56,28 +57,28 @@ public class ForecastingServiceImpl implements ForecastingService {
     @Override
     public AggregateSummary aggregateSummary(DataSet dataSet, String hierarchyType, long hierarchyId,
                                              String portfolioId, LocalDate t0Date) {
-        Hierarchy h = hierarchies.get(hierarchyType);
-        HierarchyNode node = node(h, hierarchyId);
         String portfolio = normalizePortfolio(portfolioId);
+        HierarchyNodeView h = node(hierarchyType, hierarchyId, false);
+        HierarchyNode node = h.node();
 
         Map<Long, Map<String, Number[]>> totals = facts.totals(dataSet, h.definition(), node.level(),
                 List.of(node.id()), t0Date, filterOf(portfolio));
-        return new AggregateSummary(scope(h, node), t0Date, portfolio, ForecastingConstant.DEFAULT_CURRENCY,
+        return new AggregateSummary(scope(h), t0Date, portfolio, ForecastingConstant.DEFAULT_CURRENCY,
                 periods(dataSet), rows(totals.get(node.id())));
     }
 
     @Override
     public DetailedBreakdown detailedBreakdown(DataSet dataSet, String hierarchyType, long hierarchyId,
                                                String portfolioId, LocalDate t0Date, int page, Integer size) {
-        Hierarchy h = hierarchies.get(hierarchyType);
-        HierarchyNode node = node(h, hierarchyId);
         String portfolio = normalizePortfolio(portfolioId);
         int pageSize = pageSize(size);
         if (page < 0) {
             throw invalid("page", "page must be >= 0 but was " + page);
         }
+        HierarchyNodeView h = node(hierarchyType, hierarchyId, true);
+        HierarchyNode node = h.node();
 
-        List<HierarchyNode> children = h.children(node.id());
+        List<HierarchyNode> children = h.children();
         int from = (int) Math.min((long) page * pageSize, children.size());
         List<HierarchyNode> slice = children.subList(from, Math.min(from + pageSize, children.size()));
 
@@ -90,7 +91,7 @@ public class ForecastingServiceImpl implements ForecastingService {
                         rows(totals.get(c.id()))))
                 .toList();
         int totalPages = (children.size() + pageSize - 1) / pageSize;
-        return new DetailedBreakdown(scope(h, node), t0Date, portfolio, ForecastingConstant.DEFAULT_CURRENCY,
+        return new DetailedBreakdown(scope(h), t0Date, portfolio, ForecastingConstant.DEFAULT_CURRENCY,
                 periods(dataSet), page, pageSize, children.size(), totalPages, items);
     }
 
@@ -116,14 +117,20 @@ public class ForecastingServiceImpl implements ForecastingService {
         return values == null ? Arrays.asList(new Number[facts.periodCount()]) : Arrays.asList(values);
     }
 
-    private static HierarchyNode node(Hierarchy h, long id) {
-        return h.node(id).orElseThrow(() ->
-                new CcarException(ErrorCode.HIERARCHY_NODE_NOT_FOUND, h.type() + " node " + id + " not found")
-                        .with("hierarchyType", h.type())
+    /**
+     * The node (and, if asked, its direct children) from ccar-hierarchy-service. The type is checked against the
+     * configured ones first, so an unsupported type never reaches the hierarchy service.
+     */
+    private HierarchyNodeView node(String hierarchyType, long id, boolean withChildren) {
+        HierarchyDefinition def = hierarchies.definition(hierarchyType);
+        return hierarchies.find(def, id, withChildren).orElseThrow(() ->
+                new CcarException(ErrorCode.HIERARCHY_NODE_NOT_FOUND, def.type() + " node " + id + " not found")
+                        .with("hierarchyType", def.type())
                         .with("nodeId", id));
     }
 
-    private static Scope scope(Hierarchy h, HierarchyNode node) {
+    private static Scope scope(HierarchyNodeView h) {
+        HierarchyNode node = h.node();
         return new Scope(h.type(), node.id(), node.name(), node.level());
     }
 

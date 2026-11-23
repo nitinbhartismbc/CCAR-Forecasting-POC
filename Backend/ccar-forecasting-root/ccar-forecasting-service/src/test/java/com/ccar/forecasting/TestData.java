@@ -5,13 +5,14 @@ import com.ccar.forecasting.config.properties.Account;
 import com.ccar.forecasting.config.properties.DataSetTable;
 import com.ccar.forecasting.config.properties.HierarchyType;
 import com.ccar.forecasting.constant.ForecastingConstant;
+import com.ccar.forecasting.hierarchy.RemoteHierarchyNode;
 import com.kx.c;
 
 import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Shared fixtures: a small BU hierarchy as KDB would return it, and properties with the fixed 36-period layout. */
+/** Shared fixtures: a small BU hierarchy as ccar-hierarchy-service returns it, and properties with the fixed 36-period layout. */
 public final class TestData {
 
     public static final long NJ = Long.MIN_VALUE; // q long null 0Nj
@@ -89,14 +90,38 @@ public final class TestData {
      *     +-- 110 United Kingdom
      * </pre>
      */
-    public static c.Flip buHierarchy() {
-        return flip(new String[]{"BU_ID", "BU_NAME", "LEVEL_ID", "BU_ID_LEVEL1", "BU_ID_LEVEL2", "BU_ID_LEVEL3"},
-                new long[]{1, 2, 3, 4, 109, 110},
-                new String[]{"ALL_BANK", "North America", "United States", "Canada", "Europe", "United Kingdom"},
-                new long[]{1, 2, 3, 3, 2, 3},
-                new long[]{1, 1, 1, 1, 1, 1},
-                new long[]{NJ, 2, 2, 2, 109, 109},
-                new long[]{NJ, NJ, 3, 4, NJ, 110});
+    public static RemoteHierarchyNode buTree() {
+        return node(1, "ALL_BANK", 1, null,
+                node(2, "North America", 2, 1L,
+                        node(3, "United States", 3, 2L),
+                        node(4, "Canada", 3, 2L)),
+                node(109, "Europe", 2, 1L,
+                        node(110, "United Kingdom", 3, 109L)));
+    }
+
+    /** {@code root}'s node {@code id} cut to {@code depth} levels of children, as the hierarchy service does. */
+    public static RemoteHierarchyNode find(RemoteHierarchyNode root, long id, int depth) {
+        if (root.id() == id) {
+            return truncate(root, depth);
+        }
+        for (RemoteHierarchyNode child : root.children()) {
+            RemoteHierarchyNode found = find(child, id, depth);
+            if (found != null) {
+                return found;
+            }
+        }
+        return null;
+    }
+
+    private static RemoteHierarchyNode truncate(RemoteHierarchyNode n, int depth) {
+        List<RemoteHierarchyNode> children = depth == 0 ? List.of()
+                : n.children().stream().map(c -> truncate(c, depth - 1)).toList();
+        return new RemoteHierarchyNode(n.id(), n.name(), n.levelId(), n.parentId(), n.childCount(), children);
+    }
+
+    private static RemoteHierarchyNode node(long id, String name, int level, Long parentId,
+                                            RemoteHierarchyNode... children) {
+        return new RemoteHierarchyNode(id, name, level, parentId, children.length, List.of(children));
     }
 
     public static ForecastingProperties properties() {

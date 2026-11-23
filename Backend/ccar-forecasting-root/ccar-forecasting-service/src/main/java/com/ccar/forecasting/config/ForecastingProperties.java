@@ -3,6 +3,7 @@ package com.ccar.forecasting.config;
 import com.ccar.forecasting.config.properties.Account;
 import com.ccar.forecasting.config.properties.DataSetTable;
 import com.ccar.forecasting.config.properties.Hierarchy;
+import com.ccar.forecasting.config.properties.HierarchyServiceEndpoint;
 import com.ccar.forecasting.config.properties.PortfolioMaster;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -56,6 +57,10 @@ public class ForecastingProperties {
     @Valid
     private Hierarchy hierarchy = new Hierarchy();
 
+    /** ccar-hierarchy-service, the source of hierarchy nodes (name, level, children). */
+    @Valid
+    private HierarchyServiceEndpoint hierarchyService = new HierarchyServiceEndpoint();
+
     public String getReferenceTable() {
         return referenceTable;
     }
@@ -95,5 +100,13 @@ public class ForecastingProperties {
 
     public void setHierarchy(Hierarchy hierarchy) {
         this.hierarchy = hierarchy;
+    }
+
+    public HierarchyServiceEndpoint getHierarchyService() {
+        return hierarchyService;
+    }
+
+    public void setHierarchyService(HierarchyServiceEndpoint hierarchyService) {
+        this.hierarchyService = hierarchyService;
     }
 }

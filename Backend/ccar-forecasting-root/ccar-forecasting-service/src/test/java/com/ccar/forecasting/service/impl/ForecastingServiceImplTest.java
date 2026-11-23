@@ -5,6 +5,8 @@ import com.ccar.common.error.ErrorCode;
 import com.ccar.forecasting.TestData;
 import com.ccar.forecasting.config.ForecastingProperties;
 import com.ccar.forecasting.hierarchy.HierarchyRepository;
+import com.ccar.forecasting.hierarchy.HierarchyServiceClient;
+import com.ccar.forecasting.hierarchy.RemoteHierarchyNode;
 import com.ccar.forecasting.model.AggregateSummary;
 import com.ccar.forecasting.model.DataSet;
 import com.ccar.forecasting.model.DetailedBreakdown;
@@ -14,11 +16,13 @@ import com.ccar.forecasting.service.ForecastingService;
 import com.iris.kdb.service.KdbTemplate;
 import com.kx.c;
 import org.junit.jupiter.api.Test;
+import org.springframework.web.client.RestClient;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -26,7 +30,22 @@ class ForecastingServiceImplTest {
 
     private static final LocalDate T0 = LocalDate.of(2026, 9, 30);
 
-    /** Fake KDB: the BU hierarchy and a fixed fact result; records every query. */
+    /** Fake ccar-hierarchy-service serving {@link TestData#buTree()}; records every call. */
+    private static final class FakeHierarchyService extends HierarchyServiceClient {
+        final List<String> calls = new ArrayList<>();
+
+        FakeHierarchyService() {
+            super((RestClient) null, 30);
+        }
+
+        @Override
+        public Optional<RemoteHierarchyNode> getNode(String type, long nodeId, int depth) {
+            calls.add(type + "/" + nodeId + "?depth=" + depth);
+            return Optional.ofNullable(TestData.find(TestData.buTree(), nodeId, depth));
+        }
+    }
+
+    /** Fake KDB: a fixed fact result; records every query. */
     private static final class FakeKdb extends KdbTemplate {
         final List<String> queries = new ArrayList<>();
         c.Flip facts = TestData.wideFacts(
@@ -51,13 +70,15 @@ class ForecastingServiceImplTest {
         @SuppressWarnings("unchecked")
         public <T> T execute(String query, Class<T> clazz) {
             queries.add(query);
-            return (T) (query.equals("0!select from BU_HIERARCHY") ? TestData.buHierarchy() : facts);
+            return (T) facts;
         }
     }
 
     private final FakeKdb kdb = new FakeKdb();
+    private final FakeHierarchyService hierarchyService = new FakeHierarchyService();
     private final ForecastingProperties props = TestData.properties();
-    private final ForecastingService service = new ForecastingServiceImpl(new HierarchyRepository(kdb, props),
+    private final ForecastingService service = new ForecastingServiceImpl(
+            new HierarchyRepository(hierarchyService, props),
             new FactDataRepository(kdb, props), props);
 
     @Test
@@ -81,6 +102,9 @@ class ForecastingServiceImplTest {
         assertEquals(Arrays.asList(null, null, null), rows.get(1).values().subList(0, 3)); // no data for Revenue
         assertTrue(kdb.queries.stream().anyMatch(q -> q.contains("where BU_ID_LEVEL1 in (),1]")));
         assertTrue(kdb.queries.stream().noneMatch(q -> q.contains("PORTFOLIO_ID=")));
+        // the node comes from ccar-hierarchy-service (without children), never from a KDB hierarchy table
+        assertEquals(List.of("BU/1?depth=0"), hierarchyService.calls);
+        assertTrue(kdb.queries.stream().noneMatch(q -> q.startsWith("0!select from")));
     }
 
     @Test
@@ -96,6 +120,7 @@ class ForecastingServiceImplTest {
     @Test
     void detailedBreakdownPagesTheDirectChildrenAndQueriesOnlyThatPage() {
         DetailedBreakdown page0 = service.detailedBreakdown(DataSet.FORECAST, "BU", 1, "ALL", T0, 0, 1);
+        assertEquals(List.of("BU/1?depth=1"), hierarchyService.calls);
 
         assertEquals(2, page0.totalElements());
         assertEquals(2, page0.totalPages());
@@ -145,6 +170,8 @@ class ForecastingServiceImplTest {
                 () -> service.detailedBreakdown(DataSet.FORECAST, "BU", 1, "ALL", T0, -1, 10));
         assertCode(ErrorCode.INVALID_PARAMETER,
                 () -> service.detailedBreakdown(DataSet.FORECAST, "BU", 1, "ALL", T0, 0, 501));
+        // unsupported / malformed types and bad parameters are rejected before calling the hierarchy service
+        assertEquals(List.of("BU/42?depth=0"), hierarchyService.calls);
     }
 
 
