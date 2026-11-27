@@ -9,12 +9,15 @@ import com.iris.kdb.pool.KdbConnectionPool;
 import com.kx.c;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.slf4j.MDC;
 
 import java.io.IOException;
 import java.lang.reflect.Constructor;
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
+import java.time.LocalDate;
+import java.util.Arrays;
 import java.util.NoSuchElementException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -23,6 +26,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -156,6 +160,42 @@ class KdbTemplateTest {
         when(connection.k(QUERY)).thenReturn(null);
 
         assertThatThrownBy(() -> template.execute(QUERY, c.Flip.class)).isInstanceOf(KdbQueryException.class);
+    }
+
+    @Test
+    void call_sendsFunctionNameAndTypedArgs() throws Exception {
+        LocalDate t0 = LocalDate.of(2026, 9, 30);
+        c.Flip flip = new c.Flip(new c.Dict(new String[]{"A"}, new Object[]{new long[]{1}}));
+        when(connection.k(any(Object.class))).thenReturn(flip);
+
+        c.Flip result = template.call("getAggregateActuals", c.Flip.class, "BU", 1L, "ALL", t0);
+
+        assertThat(result).isSameAs(flip);
+        ArgumentCaptor<Object> sent = ArgumentCaptor.forClass(Object.class);
+        verify(connection).k(sent.capture());
+        Object[] message = (Object[]) sent.getValue();
+        assertThat(new String((char[]) message[0])).isEqualTo("getAggregateActuals");
+        assertThat(Arrays.copyOfRange(message, 1, message.length)).containsExactly("BU", 1L, "ALL", t0);
+        verify(pool).release(connection);
+    }
+
+    @Test
+    void call_qError_isQueryException_andConnectionIsKept() throws Exception {
+        when(connection.k(any(Object.class))).thenThrow(kException("getAggregateForecast"));
+
+        assertThatThrownBy(() -> template.call("getAggregateForecast", c.Flip.class, "BU"))
+                .isInstanceOf(KdbQueryException.class)
+                .hasMessageContaining("'getAggregateForecast");
+        verify(pool).release(connection);
+    }
+
+    @Test
+    void call_timeout_isTimeoutException_andConnectionIsDiscarded() throws Exception {
+        when(connection.k(any(Object.class))).thenThrow(new SocketTimeoutException("Read timed out"));
+
+        assertThatThrownBy(() -> template.call("getAggregateActuals", c.Flip.class))
+                .isInstanceOf(KdbTimeoutException.class);
+        verify(pool).invalidate(connection);
     }
 
     @Test

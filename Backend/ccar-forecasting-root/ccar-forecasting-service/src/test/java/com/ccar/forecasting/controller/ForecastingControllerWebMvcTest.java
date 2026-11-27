@@ -55,7 +55,7 @@ class ForecastingControllerWebMvcTest {
     @Test
     void aggregateSummary() throws Exception {
         when(service.aggregateSummary(DataSet.ACTUALS, "BU", 1, "ALL", T0)).thenReturn(
-                new AggregateSummary(SCOPE, T0, "ALL", "USD", List.of("T0", "T-1"), ROWS));
+                new AggregateSummary(SCOPE, T0, "ALL", "USD", List.of("T0", "T-1"), ROWS, null));
 
         mvc.perform(get("/v1/actuals/aggregate-summary")
                         .param("hierarchyType", "BU").param("hierarchyId", "1")
@@ -65,10 +65,26 @@ class ForecastingControllerWebMvcTest {
                 .andExpect(jsonPath("$.scope.name").value("ALL_BANK"))
                 .andExpect(jsonPath("$.t0Date").value("2026-09-30"))
                 .andExpect(jsonPath("$.periods[1]").value("T-1"))
-                .andExpect(jsonPath("$.period_values[0].accountId").value("210001"))
-                .andExpect(jsonPath("$.period_values[0].measure").value("Balance"))
-                .andExpect(jsonPath("$.period_values[0].values[0]").value(8504978))
-                .andExpect(jsonPath("$.period_values[0].values[1]").value(nullValue()));
+                .andExpect(jsonPath("$.periodValuesActual[0].accountId").value("210001"))
+                .andExpect(jsonPath("$.periodValuesActual[0].measure").value("Balance"))
+                .andExpect(jsonPath("$.periodValuesActual[0].values[0]").value(8504978))
+                .andExpect(jsonPath("$.periodValuesActual[0].values[1]").value(nullValue()))
+                .andExpect(jsonPath("$.periodValuesForecast").doesNotExist())
+                .andExpect(jsonPath("$.period_values").doesNotExist());
+    }
+
+    @Test
+    void varianceAggregateSummaryHasActualAndForecastValues() throws Exception {
+        when(service.aggregateSummary(DataSet.VARIANCE, "BU", 1, "ALL", T0)).thenReturn(
+                new AggregateSummary(SCOPE, T0, "ALL", "USD", List.of("T0", "T-1"), ROWS, ROWS));
+
+        mvc.perform(get("/v1/variance/aggregate-summary")
+                        .param("hierarchyType", "BU").param("hierarchyId", "1")
+                        .param("portfolioId", "ALL").param("t0Date", "2026-09-30"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.periodValuesActual[0].measure").value("Balance"))
+                .andExpect(jsonPath("$.periodValuesForecast[0].measure").value("Balance"))
+                .andExpect(jsonPath("$.periodValuesForecast[0].values[1]").value(nullValue()));
     }
 
     @Test

@@ -25,6 +25,39 @@ public final class TestData {
     }
 
     /**
+     * Builds the result of a KDB aggregate function (getAggregateActuals, ...): {@code ACCOUNT_ID, ACCOUNT_NAME,
+     * TO_DATE, T0, T_1 .. T_36} as floats, with the given values for the supplied periods and q nulls (NaN)
+     * everywhere else.
+     *
+     * @param accountIds         {@code long[]} column
+     * @param suppliedPeriodCols pairs of {@code (periodColumnName, double[])}
+     */
+    public static c.Flip accountFacts(long[] accountIds, Object... suppliedPeriodCols) {
+        int rows = accountIds.length;
+        List<String> colNames = new ArrayList<>(List.of("ACCOUNT_ID", "ACCOUNT_NAME", "TO_DATE"));
+        String[] names = new String[rows];
+        java.time.LocalDate[] dates = new java.time.LocalDate[rows];
+        for (int i = 0; i < rows; i++) {
+            names[i] = String.valueOf(accountIds[i]);
+            dates[i] = java.time.LocalDate.of(2026, 9, 30);
+        }
+        List<Object> colData = new ArrayList<>(List.of(accountIds, names, dates));
+        for (int n = 0; n <= ForecastingConstant.PERIOD_COUNT; n++) {
+            String col = n == 0 ? "T0" : "T_" + n;
+            colNames.add(col);
+            double[] values = new double[rows];
+            java.util.Arrays.fill(values, Double.NaN);
+            for (int i = 0; i < suppliedPeriodCols.length; i += 2) {
+                if (suppliedPeriodCols[i].equals(col)) {
+                    values = (double[]) suppliedPeriodCols[i + 1];
+                }
+            }
+            colData.add(values);
+        }
+        return flip(colNames.toArray(new String[0]), colData.toArray());
+    }
+
+    /**
      * Builds a fact-query result flip containing every column {@code FactDataRepository} expects
      * ({@code NODE__ID, ACCOUNT_ID, T0, N__T0, T_1, N__T_1, ..., T_36, N__T_36}), using the given values for the
      * periods actually supplied and nulls/zero-counts for every other period, so tests only need to spell out the
@@ -131,6 +164,8 @@ public final class TestData {
             t.setTable("CCAR_" + ds.toUpperCase());
             p.getDatasets().put(ds, t);
         }
+        p.getDatasets().get("actuals").setAggregateFunction("getAggregateActuals");
+        p.getDatasets().get("forecast").setAggregateFunction("getAggregateForecast");
         p.getAccounts().add(new Account("210001", "Balance"));
         p.getAccounts().add(new Account("400001", "Revenue"));
         p.getAccounts().add(new Account("500001", "Expense"));

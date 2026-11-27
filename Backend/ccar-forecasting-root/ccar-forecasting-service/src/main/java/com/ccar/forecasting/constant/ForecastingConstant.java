@@ -13,6 +13,9 @@ public final class ForecastingConstant {
     /** Portfolio id meaning "all portfolios" (no portfolio filter). */
     public static final String ALL_PORTFOLIOS_ID = "PORT_ALL";
 
+    /** portfolioId argument meaning "all portfolios" for the KDB aggregate functions (getAggregateActuals, ...). */
+    public static final String KDB_ALL_PORTFOLIOS = "ALL";
+
     /** Number of periods after T0: T+1..T+n (forecast) / T-1..T-n (actuals, variance). */
     public static final int PERIOD_COUNT = 36;
 

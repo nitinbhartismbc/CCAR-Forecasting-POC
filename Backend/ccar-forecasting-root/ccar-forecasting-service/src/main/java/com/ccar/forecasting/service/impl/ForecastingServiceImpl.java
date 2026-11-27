@@ -59,12 +59,19 @@ public class ForecastingServiceImpl implements ForecastingService {
                                              String portfolioId, LocalDate t0Date) {
         String portfolio = normalizePortfolio(portfolioId);
         HierarchyNodeView h = node(hierarchyType, hierarchyId, false);
-        HierarchyNode node = h.node();
-
-        Map<Long, Map<String, Number[]>> totals = facts.totals(dataSet, h.definition(), node.level(),
-                List.of(node.id()), t0Date, filterOf(portfolio));
+        // variance = actuals and forecast side by side (read from their own tables)
+        List<PeriodValues> actual = dataSet == DataSet.FORECAST ? null
+                : nodeRows(DataSet.ACTUALS, h, t0Date, portfolio);
+        List<PeriodValues> forecast = dataSet == DataSet.ACTUALS ? null
+                : nodeRows(DataSet.FORECAST, h, t0Date, portfolio);
         return new AggregateSummary(scope(h), t0Date, portfolio, ForecastingConstant.DEFAULT_CURRENCY,
-                periods(dataSet), rows(totals.get(node.id())));
+                periods(dataSet), actual, forecast);
+    }
+
+    /** Totals of the node itself (its whole subtree), from the data set's KDB aggregate function. */
+    private List<PeriodValues> nodeRows(DataSet dataSet, HierarchyNodeView h, LocalDate t0Date, String portfolio) {
+        return rows(facts.nodeTotals(dataSet, h.definition(), h.node().id(), t0Date, filterOf(portfolio),
+                ForecastingConstant.DEFAULT_CURRENCY));
     }
 
     @Override

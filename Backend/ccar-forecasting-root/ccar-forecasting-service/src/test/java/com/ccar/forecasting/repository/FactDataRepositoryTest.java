@@ -9,6 +9,7 @@ import com.kx.c;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -91,5 +92,80 @@ class FactDataRepositoryTest {
     @Test
     void noNodesNoQuery() {
         assertTrue(repo.totals(DataSet.FORECAST, BU, 1, List.of(), LocalDate.now(), null).isEmpty());
+    }
+
+    // ---- nodeTotals: KDB aggregate functions ----------------------------------------------------------------
+
+    /** Records every function call and answers with {@code result}. */
+    private static final class FunctionKdb extends KdbTemplate {
+        final List<String> functions = new ArrayList<>();
+        final List<Object[]> args = new ArrayList<>();
+        final c.Flip result;
+
+        FunctionKdb(c.Flip result) {
+            super(null);
+            this.result = result;
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T> T call(String function, Class<T> clazz, Object... a) {
+            functions.add(function);
+            args.add(a);
+            return (T) result;
+        }
+
+        @Override
+        public <T> T execute(String query, Class<T> clazz) {
+            throw new AssertionError("no query expected: " + query);
+        }
+    }
+
+    @Test
+    void nodeTotalsCallsTheActualsFunctionWithTypedArgs() {
+        LocalDate t0 = LocalDate.of(2026, 9, 30);
+        FunctionKdb kdb = new FunctionKdb(TestData.accountFacts(new long[]{210001, 400001},
+                "T0", new double[]{100.5, 7}, "T_2", new double[]{Double.NaN, 9}));
+        FactDataRepository r = new FactDataRepository(kdb, TestData.properties());
+
+        Map<String, Number[]> totals = r.nodeTotals(DataSet.ACTUALS, BU, 2L, t0, "PORT_0001", "USD");
+
+        assertEquals(List.of("getAggregateActuals"), kdb.functions);
+        assertArrayEquals(new Object[]{"BU", 2L, "PORT_0001", "USD", t0}, kdb.args.get(0));
+        assertArrayEquals(TestData.periods(100.5), totals.get("210001"));
+        assertArrayEquals(TestData.periods(7.0, null, 9.0), totals.get("400001"));
+    }
+
+    @Test
+    void nodeTotalsForAllPortfoliosSendsAllAndUsesTheForecastFunction() {
+        FunctionKdb kdb = new FunctionKdb(TestData.accountFacts(new long[0]));
+        FactDataRepository r = new FactDataRepository(kdb, TestData.properties());
+
+        assertTrue(r.nodeTotals(DataSet.FORECAST, BU, 1L, LocalDate.of(2026, 9, 30), null, "USD").isEmpty());
+        assertEquals(List.of("getAggregateForecast"), kdb.functions);
+        assertEquals("ALL", kdb.args.get(0)[2]);
+    }
+
+    @Test
+    void nodeTotalsWithoutAConfiguredFunctionFails() {
+        assertThrows(IllegalStateException.class,
+                () -> repo.nodeTotals(DataSet.VARIANCE, BU, 1L, LocalDate.of(2026, 9, 30), null, "USD"));
+    }
+
+    @Test
+    void nodeTotalsWithAnUnexpectedResultLayoutIsAKdbQueryFailure() {
+        FactDataRepository r = new FactDataRepository(
+                new FunctionKdb(TestData.flip(new String[]{"x"}, new long[]{1})), TestData.properties());
+
+        assertThrows(KdbQueryException.class,
+                () -> r.nodeTotals(DataSet.ACTUALS, BU, 1L, LocalDate.of(2026, 9, 30), null, "USD"));
+    }
+
+    @Test
+    void unsafeFunctionNameIsRejectedAtStartup() {
+        var props = TestData.properties();
+        props.getDatasets().get("actuals").setAggregateFunction("getAggregateActuals;delete");
+
+        assertThrows(IllegalArgumentException.class, () -> new FactDataRepository(new KdbTemplate(null), props));
     }
 }

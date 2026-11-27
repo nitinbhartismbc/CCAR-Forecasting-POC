@@ -60,6 +60,14 @@ public class KdbLoggingAspect {
         if (args.length == 0 || !(args[0] instanceof String q)) {
             return "-";
         }
+        // call(function, resultType, args...): log as fn[arg1;arg2;...]
+        if (args.length == 3 && args[1] instanceof Class<?> && args[2] instanceof Object[] fnArgs) {
+            StringBuilder sb = new StringBuilder(q).append('[');
+            for (int i = 0; i < fnArgs.length; i++) {
+                sb.append(i == 0 ? "" : ";").append(fnArgs[i] instanceof char[] s ? new String(s) : fnArgs[i]);
+            }
+            q = sb.append(']').toString();
+        }
         return q.length() > maxQueryLength
                 ? q.substring(0, maxQueryLength) + "...(truncated)"
                 : q;

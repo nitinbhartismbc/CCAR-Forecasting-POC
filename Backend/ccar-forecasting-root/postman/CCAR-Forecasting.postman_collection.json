@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "fa0f7efc-7830-4149-9a52-4d7f65dca5c9",
     "name": "CCAR Forecasting API",
-    "description": "Happy-path and negative tests for the CCAR Forecasting POC through the API gateway.\n\n**Run order:** use the Collection Runner on the whole collection (folders 01-11 in order, including 10b). Folder 01 registers a fresh user and stores the JWT; folder 11 deletes it again.\n\n**Environment:** import `CCAR-Local.postman_environment.json` and select it.\n\n**Every response** is also checked against the shared contract: `X-Correlation-Id` echoed, and every 4xx/5xx is RFC 9457 problem+json with `errorCode`, `correlationId` (equal to the header), `service` and `timestamp`.\n\n**Folder 03** needs KDB+ with the BU_HIERARCHY and GEO_HIERARCHY tables. **Folders 10 and 10b** call ccar-forecasting-service (/ccar/v1) through the gateway and need the CCAR_FORECAST / CCAR_ACTUALS / CCAR_VARIANCE tables in KDB+. **Folder 08** only runs its checks when a dependency is stopped; otherwise its tests are skipped.",
+    "description": "Happy-path and negative tests for the CCAR Forecasting POC through the API gateway.\n\n**Run order:** use the Collection Runner on the whole collection (folders 01-11 in order, including 10b). Folder 01 registers a fresh user and stores the JWT; folder 11 deletes it again.\n\n**Environment:** import `CCAR-Local.postman_environment.json` and select it.\n\n**Every response** is also checked against the shared contract: `X-Correlation-Id` echoed, and every 4xx/5xx is RFC 9457 problem+json with `errorCode`, `correlationId` (equal to the header), `service` and `timestamp`.\n\n**Folder 03** needs KDB+ with the BU_HIERARCHY and GEO_HIERARCHY tables. **Folders 10 and 10b** call ccar-forecasting-service (/ccar/v1) through the gateway and need the fact tables in KDB+ and ccar-hierarchy-service running (ccar-forecasting-service reads hierarchy nodes from it). **Folder 08** only runs its checks when a dependency is stopped; otherwise its tests are skipped.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -108,6 +108,10 @@
     },
     {
       "key": "v1ChildBuId",
+      "value": ""
+    },
+    {
+      "key": "v1RootGeoId",
       "value": ""
     }
   ],
@@ -2288,7 +2292,7 @@
     },
     {
       "name": "08 Resilience - run with a dependency stopped",
-      "description": "These requests check failure handling when a dependency is down. With everything healthy their tests are SKIPPED, not failed. To exercise them: stop KDB+ (or point kdb.host at a dead host), stop ccar-hierarchy-service, or stop ccar-user-service, then run the matching request. Hierarchies are cached, so once loaded they keep serving while KDB+ is down; only a load or reload hits KDB+.",
+      "description": "These requests check failure handling when a dependency is down. With everything healthy their tests are SKIPPED, not failed. To exercise them: stop KDB+ (or point kdb.host at a dead host), stop ccar-hierarchy-service (this also breaks the /ccar/v1 data requests, which read nodes from it), or stop ccar-user-service, then run the matching request. Hierarchies are cached, so once loaded they keep serving while KDB+ is down; only a load or reload hits KDB+.",
       "item": [
         {
           "name": "KDB+ down at startup: BU hierarchy -> 503",
@@ -2499,7 +2503,7 @@
                 }
               ]
             },
-            "description": "Stop KDB+ (or drop CCAR_FORECAST). The hierarchy is cached, so the fact query is what fails."
+            "description": "Stop KDB+ (or drop the Forecast table). Hierarchy nodes come from the cache of ccar-hierarchy-service, so the fact query is what fails."
           },
           "event": [
             {
@@ -2514,6 +2518,66 @@
                   "        pm.expect([\"KDB_UNAVAILABLE\", \"KDB_POOL_EXHAUSTED\", \"KDB_TIMEOUT\", \"KDB_QUERY_FAILED\"]).to.include(pm.response.json().errorCode);",
                   "    });",
                   "    pm.test('answered by ccar-forecasting-service', () => pm.expect(pm.response.json().service).to.eql('ccar-forecasting-service'));",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "ccar-hierarchy-service down: forecast summary -> 503 DOWNSTREAM_UNAVAILABLE",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/v1/forecast/aggregate-summary?hierarchyType=BU&hierarchyId={{v1RootBuId}}&portfolioId=ALL&t0Date={{t0Date}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "v1",
+                "forecast",
+                "aggregate-summary"
+              ],
+              "query": [
+                {
+                  "key": "hierarchyType",
+                  "value": "BU"
+                },
+                {
+                  "key": "hierarchyId",
+                  "value": "{{v1RootBuId}}"
+                },
+                {
+                  "key": "portfolioId",
+                  "value": "ALL"
+                },
+                {
+                  "key": "t0Date",
+                  "value": "{{t0Date}}"
+                }
+              ]
+            },
+            "description": "Stop ccar-hierarchy-service, keep ccar-forecasting-service running. Its hierarchy client cannot connect (503) or times out (504, after ccar.forecasting.hierarchy-service.read-timeout-ms)."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code < 500) {",
+                  "    pm.test.skip(\"dependency is healthy - stop it to exercise this scenario (see request description)\", () => {});",
+                  "} else {",
+                  "    pm.test(\"5xx with one of DOWNSTREAM_UNAVAILABLE, DOWNSTREAM_TIMEOUT\", () => {",
+                  "        pm.expect([\"DOWNSTREAM_UNAVAILABLE\", \"DOWNSTREAM_TIMEOUT\"]).to.include(pm.response.json().errorCode);",
+                  "    });",
+                  "    pm.test(\"Retry-After present on 503\", () => {",
+                  "        if (pm.response.code === 503) pm.expect(pm.response.headers.has(\"Retry-After\")).to.be.true;",
+                  "    });",
+                  "    pm.test('answered by ccar-forecasting-service', () => pm.expect(pm.response.json().service).to.eql('ccar-forecasting-service'));",
+                  "    pm.test('hierarchyType in body', () => pm.expect(pm.response.json().hierarchyType).to.eql('BU'));",
                   "}"
                 ]
               }
@@ -2711,7 +2775,7 @@
     },
     {
       "name": "10 Forecasting data (/ccar/v1) - happy path",
-      "description": "ccar-forecasting-service through the gateway (route /ccar/v1/**). Needs KDB+ with BU_HIERARCHY, GEO_HIERARCHY and the CCAR_FORECAST / CCAR_ACTUALS / CCAR_VARIANCE tables (CCAR_FACT_TABLES_LOAD.q). Stores {{t0Date}}, {{portfolioId}}, {{v1RootBuId}}, {{v1ChildBuId}}.",
+      "description": "ccar-forecasting-service through the gateway (route /ccar/v1/**): portfolios, T0 dates, and aggregate summary / detailed breakdown for forecast, actuals and variance. ccar-forecasting-service reads hierarchy nodes from ccar-hierarchy-service (it has no hierarchy endpoints of its own any more), so both services must be running. Needs KDB+ with BU_HIERARCHY, GEO_HIERARCHY and the fact tables. Stores {{t0Date}}, {{portfolioId}}, {{v1RootBuId}}, {{v1ChildBuId}}, {{v1RootGeoId}}.",
       "item": [
         {
           "name": "Portfolios",
@@ -2785,23 +2849,29 @@
           ]
         },
         {
-          "name": "BU hierarchy (flat, from root)",
+          "name": "Setup: BU root and first child (ccar-hierarchy-service)",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/ccar/v1/hierarchy/root/BU",
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/BU?depth=1",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "ccar",
-                "v1",
+                "forecast",
                 "hierarchy",
-                "root",
                 "BU"
+              ],
+              "query": [
+                {
+                  "key": "depth",
+                  "value": "1"
+                }
               ]
-            }
+            },
+            "description": "ccar-forecasting-service no longer serves hierarchies (GET /ccar/v1/hierarchy/root/{type} and POST /ccar/v1/hierarchy/{type}/reload were removed): it reads nodes from ccar-hierarchy-service. This request takes the root and a level-2 node from that service for the data requests below."
           },
           "event": [
             {
@@ -2810,43 +2880,40 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
-                  "const n = pm.response.json();",
-                  "pm.test('flat list: root first, every node has the UI fields', () => {",
-                  "    pm.expect(n.length).to.be.above(0);",
-                  "    pm.expect(n[0].parentId).to.be.null;",
-                  "    pm.expect(n[0].level).to.eql(1);",
-                  "    n.forEach(x => pm.expect(x).to.have.keys('id', 'name', 'level', 'parentId', 'childCount', 'isLeafNode'));",
+                  "const r = pm.response.json();",
+                  "pm.test('root node with its direct children', () => {",
+                  "    pm.expect(r.parentId).to.be.null;",
+                  "    pm.expect(r.levelId).to.eql(1);",
+                  "    pm.expect(r.children.length, 'root has no children').to.be.above(0);",
                   "});",
-                  "pm.test('isLeafNode == (childCount == 0)', () => n.forEach(x => pm.expect(x.isLeafNode).to.eql(x.childCount === 0)));",
-                  "pm.test('childCount matches the parentIds in the list', () => {",
-                  "    const counts = {};",
-                  "    n.forEach(x => { if (x.parentId !== null) counts[x.parentId] = (counts[x.parentId] || 0) + 1; });",
-                  "    pm.expect(n[0].childCount).to.eql(counts[n[0].id] || 0);",
-                  "});",
-                  "pm.collectionVariables.set('v1RootBuId', n[0].id);",
-                  "const child = n.find(x => x.parentId === n[0].id);",
-                  "if (child) pm.collectionVariables.set('v1ChildBuId', child.id);"
+                  "pm.collectionVariables.set('v1RootBuId', r.id);",
+                  "if (r.children.length) pm.collectionVariables.set('v1ChildBuId', r.children[0].id);"
                 ]
               }
             }
           ]
         },
         {
-          "name": "GEO hierarchy (flat, from root)",
+          "name": "Setup: GEO root (ccar-hierarchy-service)",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/ccar/v1/hierarchy/root/GEO",
+              "raw": "{{baseUrl}}/ccar/forecast/hierarchy/GEO?depth=0",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "ccar",
-                "v1",
+                "forecast",
                 "hierarchy",
-                "root",
                 "GEO"
+              ],
+              "query": [
+                {
+                  "key": "depth",
+                  "value": "0"
+                }
               ]
             },
             "description": "Needs the GEO_HIERARCHY table in KDB+."
@@ -2858,43 +2925,9 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
-                  "pm.test('root first', () => pm.expect(pm.response.json()[0].parentId).to.be.null);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Reload BU hierarchy",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/ccar/v1/hierarchy/BU/reload",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "ccar",
-                "v1",
-                "hierarchy",
-                "BU",
-                "reload"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
-                  "pm.test('type and node count', () => {",
-                  "    const r = pm.response.json();",
-                  "    pm.expect(r.type).to.eql('BU');",
-                  "    pm.expect(r.nodes).to.be.above(0);",
-                  "});"
+                  "const r = pm.response.json();",
+                  "pm.test('root node', () => pm.expect(r.parentId).to.be.null);",
+                  "pm.collectionVariables.set('v1RootGeoId', r.id);"
                 ]
               }
             }
@@ -2959,13 +2992,18 @@
                   "    pm.expect(s.periods[1]).to.eql('T+1');",
                   "    pm.expect(s.periods[36]).to.eql('T+36');",
                   "});",
-                  "pm.test('period_values: Balance, Revenue, Expense first, one value (or null) per period', () => {",
-                  "    pm.expect(s.period_values.slice(0, 3).map(r => r.accountId)).to.eql(['210001', '400001', '500001']);",
-                  "    pm.expect(s.period_values.slice(0, 3).map(r => r.measure)).to.eql(['Balance', 'Revenue', 'Expense']);",
-                  "    s.period_values.forEach(r => {",
+                  "pm.test('periodValuesForecast: Balance, Revenue, Expense first, one value (or null) per period', () => {",
+                  "    const rows = s.periodValuesForecast;",
+                  "    pm.expect(rows.slice(0, 3).map(r => r.accountId)).to.eql(['210001', '400001', '500001']);",
+                  "    pm.expect(rows.slice(0, 3).map(r => r.measure)).to.eql(['Balance', 'Revenue', 'Expense']);",
+                  "    rows.forEach(r => {",
                   "        pm.expect(r.values).to.have.lengthOf(s.periods.length);",
                   "        r.values.forEach(v => pm.expect(v === null || typeof v === 'number').to.be.true);",
                   "    });",
+                  "});",
+                  "pm.test('only the value lists of this data set (old single list removed)', () => {",
+                  "    pm.expect(s).to.not.have.property('periodValuesActual');",
+                  "    pm.expect(s).to.not.have.property('period_values');",
                   "});"
                 ]
               }
@@ -3031,13 +3069,18 @@
                   "    pm.expect(s.periods[1]).to.eql('T-1');",
                   "    pm.expect(s.periods[36]).to.eql('T-36');",
                   "});",
-                  "pm.test('period_values: Balance, Revenue, Expense first, one value (or null) per period', () => {",
-                  "    pm.expect(s.period_values.slice(0, 3).map(r => r.accountId)).to.eql(['210001', '400001', '500001']);",
-                  "    pm.expect(s.period_values.slice(0, 3).map(r => r.measure)).to.eql(['Balance', 'Revenue', 'Expense']);",
-                  "    s.period_values.forEach(r => {",
+                  "pm.test('periodValuesActual: Balance, Revenue, Expense first, one value (or null) per period', () => {",
+                  "    const rows = s.periodValuesActual;",
+                  "    pm.expect(rows.slice(0, 3).map(r => r.accountId)).to.eql(['210001', '400001', '500001']);",
+                  "    pm.expect(rows.slice(0, 3).map(r => r.measure)).to.eql(['Balance', 'Revenue', 'Expense']);",
+                  "    rows.forEach(r => {",
                   "        pm.expect(r.values).to.have.lengthOf(s.periods.length);",
                   "        r.values.forEach(v => pm.expect(v === null || typeof v === 'number').to.be.true);",
                   "    });",
+                  "});",
+                  "pm.test('only the value lists of this data set (old single list removed)', () => {",
+                  "    pm.expect(s).to.not.have.property('periodValuesForecast');",
+                  "    pm.expect(s).to.not.have.property('period_values');",
                   "});"
                 ]
               }
@@ -3079,7 +3122,7 @@
                 }
               ]
             },
-            "description": "Months without data come back as null; the UI shows \"-\"."
+            "description": "Actuals (periodValuesActual) and forecast (periodValuesForecast) side by side, read from the Actuals and Forecast tables. Months without data come back as null; the UI shows \"-\"."
           },
           "event": [
             {
@@ -3104,13 +3147,26 @@
                   "    pm.expect(s.periods[1]).to.eql('T-1');",
                   "    pm.expect(s.periods[36]).to.eql('T-36');",
                   "});",
-                  "pm.test('period_values: Balance, Revenue, Expense first, one value (or null) per period', () => {",
-                  "    pm.expect(s.period_values.slice(0, 3).map(r => r.accountId)).to.eql(['210001', '400001', '500001']);",
-                  "    pm.expect(s.period_values.slice(0, 3).map(r => r.measure)).to.eql(['Balance', 'Revenue', 'Expense']);",
-                  "    s.period_values.forEach(r => {",
+                  "pm.test('periodValuesActual: Balance, Revenue, Expense first, one value (or null) per period', () => {",
+                  "    const rows = s.periodValuesActual;",
+                  "    pm.expect(rows.slice(0, 3).map(r => r.accountId)).to.eql(['210001', '400001', '500001']);",
+                  "    pm.expect(rows.slice(0, 3).map(r => r.measure)).to.eql(['Balance', 'Revenue', 'Expense']);",
+                  "    rows.forEach(r => {",
                   "        pm.expect(r.values).to.have.lengthOf(s.periods.length);",
                   "        r.values.forEach(v => pm.expect(v === null || typeof v === 'number').to.be.true);",
                   "    });",
+                  "});",
+                  "pm.test('periodValuesForecast: Balance, Revenue, Expense first, one value (or null) per period', () => {",
+                  "    const rows = s.periodValuesForecast;",
+                  "    pm.expect(rows.slice(0, 3).map(r => r.accountId)).to.eql(['210001', '400001', '500001']);",
+                  "    pm.expect(rows.slice(0, 3).map(r => r.measure)).to.eql(['Balance', 'Revenue', 'Expense']);",
+                  "    rows.forEach(r => {",
+                  "        pm.expect(r.values).to.have.lengthOf(s.periods.length);",
+                  "        r.values.forEach(v => pm.expect(v === null || typeof v === 'number').to.be.true);",
+                  "    });",
+                  "});",
+                  "pm.test('only the value lists of this data set (old single list removed)', () => {",
+                  "    pm.expect(s).to.not.have.property('period_values');",
                   "});"
                 ]
               }
@@ -3167,6 +3223,60 @@
                   "    pm.expect(s.scope.level).to.eql(2);",
                   "});",
                   "pm.test('portfolio echoed', () => pm.expect(s.portfolioId).to.eql(pm.collectionVariables.get('portfolioId')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Forecast aggregate summary (GEO root)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/v1/forecast/aggregate-summary?hierarchyType=GEO&hierarchyId={{v1RootGeoId}}&portfolioId=ALL&t0Date={{t0Date}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "v1",
+                "forecast",
+                "aggregate-summary"
+              ],
+              "query": [
+                {
+                  "key": "hierarchyType",
+                  "value": "GEO"
+                },
+                {
+                  "key": "hierarchyId",
+                  "value": "{{v1RootGeoId}}"
+                },
+                {
+                  "key": "portfolioId",
+                  "value": "ALL"
+                },
+                {
+                  "key": "t0Date",
+                  "value": "{{t0Date}}"
+                }
+              ]
+            },
+            "description": "GEO node fetched from ccar-hierarchy-service, facts joined on GEO_ID. Needs GEO_HIERARCHY in KDB+."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const s = pm.response.json();",
+                  "pm.test('scope is the GEO root', () => {",
+                  "    pm.expect(s.scope).to.include({ type: 'GEO', id: Number(pm.collectionVariables.get('v1RootGeoId')), level: 1 });",
+                  "});",
+                  "pm.test('periods start T0, T+1', () => pm.expect(s.periods.slice(0, 2)).to.eql(['T0', 'T+1']));"
                 ]
               }
             }
@@ -3481,55 +3591,34 @@
           ]
         },
         {
-          "name": "Unsupported hierarchy root type -> 404 HIERARCHY_NOT_FOUND",
+          "name": "Malformed hierarchyType -> 400 INVALID_PARAMETER",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/ccar/v1/hierarchy/root/NOSUCHTYPE",
+              "raw": "{{baseUrl}}/ccar/v1/forecast/aggregate-summary?hierarchyType=1BAD-TYPE&hierarchyId={{v1RootBuId}}&t0Date={{t0Date}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "ccar",
                 "v1",
-                "hierarchy",
-                "root",
-                "NOSUCHTYPE"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"404 HIERARCHY_NOT_FOUND\", () => {",
-                  "    pm.response.to.have.status(404);",
-                  "    pm.expect(pm.response.json().errorCode).to.eql(\"HIERARCHY_NOT_FOUND\");",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Malformed hierarchy type -> 400 INVALID_PARAMETER",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/ccar/v1/hierarchy/root/1BAD-TYPE",
-              "host": [
-                "{{baseUrl}}"
+                "forecast",
+                "aggregate-summary"
               ],
-              "path": [
-                "ccar",
-                "v1",
-                "hierarchy",
-                "root",
-                "1BAD-TYPE"
+              "query": [
+                {
+                  "key": "hierarchyType",
+                  "value": "1BAD-TYPE"
+                },
+                {
+                  "key": "hierarchyId",
+                  "value": "{{v1RootBuId}}"
+                },
+                {
+                  "key": "t0Date",
+                  "value": "{{t0Date}}"
+                }
               ]
             }
           },
@@ -3542,6 +3631,42 @@
                   "pm.test(\"400 INVALID_PARAMETER\", () => {",
                   "    pm.response.to.have.status(400);",
                   "    pm.expect(pm.response.json().errorCode).to.eql(\"INVALID_PARAMETER\");",
+                  "});",
+                  "pm.test('parameter in body', () => pm.expect(pm.response.json().parameter).to.eql('hierarchyType'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Removed /v1/hierarchy/root endpoint -> 404 RESOURCE_NOT_FOUND",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ccar/v1/hierarchy/root/BU",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ccar",
+                "v1",
+                "hierarchy",
+                "root",
+                "BU"
+              ]
+            },
+            "description": "Hierarchies are served only by ccar-hierarchy-service (/ccar/forecast/hierarchy/{type})."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"404 RESOURCE_NOT_FOUND\", () => {",
+                  "    pm.response.to.have.status(404);",
+                  "    pm.expect(pm.response.json().errorCode).to.eql(\"RESOURCE_NOT_FOUND\");",
                   "});"
                 ]
               }
@@ -3578,7 +3703,8 @@
                   "value": "{{t0Date}}"
                 }
               ]
-            }
+            },
+            "description": "ccar-hierarchy-service answers 404 for the node; ccar-forecasting-service reports it as its own HIERARCHY_NODE_NOT_FOUND."
           },
           "event": [
             {
@@ -3590,7 +3716,8 @@
                   "    pm.response.to.have.status(404);",
                   "    pm.expect(pm.response.json().errorCode).to.eql(\"HIERARCHY_NODE_NOT_FOUND\");",
                   "});",
-                  "pm.test('nodeId in body', () => pm.expect(pm.response.json().nodeId).to.eql(999999999));"
+                  "pm.test('nodeId in body', () => pm.expect(pm.response.json().nodeId).to.eql(999999999));",
+                  "pm.test('answered by ccar-forecasting-service', () => pm.expect(pm.response.json().service).to.eql('ccar-forecasting-service'));"
                 ]
               }
             }

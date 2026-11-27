@@ -205,7 +205,14 @@ hierarchy node, read from KDB+. Port **8083**, context path **`/ccar`**, all end
   | `T0`, `T_1` .. `T_36` | `j` or `f` | Forecast: T0, T+1 .. T+36. Actuals / variance: T0, T-1 .. T-36. Null = no data |
 
   [`CCAR_FACT_TABLES_LOAD.q`](CCAR_FACT_TABLES_LOAD.q) builds sample tables in this layout from `BU_HIERARCHY`.
-  Variance is read from its own table, not calculated by the service.
+- **Aggregate summary via KDB functions:** `aggregate-summary` calls q functions defined on the KDB server,
+  `getAggregateActuals` and `getAggregateForecast` (`ccar.forecasting.datasets.{actuals,forecast}.aggregate-function`),
+  as `fn[hierarchyType; hierarchyId; portfolioId; currencyCode; t0Date]`, e.g. ``getAggregateActuals[`BU;1;`ALL;`USD;2026.09.30]``.
+  Arguments are sent as typed IPC values (`KdbTemplate.call`), not spliced into query text. Both functions must be
+  loaded on the server (`kdb/detailed_actuals.q` defines `getAggregateActuals`). The detailed breakdown still builds
+  its query in `FactDataRepository`.
+  The variance aggregate summary returns the actuals and forecast tables side by side; the variance table is
+  read only by the variance detailed breakdown.
 - Errors, correlation id and controller/service logging come from ccar-common (`KdbErrorMapper` maps KDB
   failures to 503 / 504 / 502); the service has no handler or aspect of its own.
 
@@ -527,7 +534,7 @@ curl -s "http://localhost:8089/ccar/v1/forecast/aggregate-summary?hierarchyType=
   "portfolioId": "ALL",
   "currency": "USD",
   "periods": ["T0", "T+1", "T+2", "...", "T+36"],
-  "period_values": [
+  "periodValuesForecast": [
     { "accountId": "210001", "measure": "Balance", "values": [8504978, 8516417, 8531029, "...", 9683892] },
     { "accountId": "400001", "measure": "Revenue", "values": [79214, 79802, null, "...", 96925] },
     { "accountId": "500001", "measure": "Expense", "values": [730235, 734120, 738011, "...", 868221] }
@@ -535,6 +542,9 @@ curl -s "http://localhost:8089/ccar/v1/forecast/aggregate-summary?hierarchyType=
 }
 ```
 
+The value list depends on the data set: forecast returns `periodValuesForecast`, actuals returns
+`periodValuesActual`, and variance returns both (actuals from the actuals table, forecast from the forecast
+table, same node, T0 date and portfolio), so the UI can compare them period by period.
 `null` means no data for that period; the UI shows `-`. `values[i]` belongs to `periods[i]`.
 
 ```bash
@@ -592,7 +602,7 @@ order. See [`postman/README.md`](postman/README.md).
 | `GET` | `/ccar/v1/t0-dates` | Bearer | T0 dates with data, latest first | `200 ["2026-09-30", …]` |
 | `GET` | `/ccar/v1/hierarchy/root/{type}` | Bearer | Whole `BU` / `GEO` hierarchy, flat, root first | `200 [{id, name, level, parentId, childCount, isLeafNode}]` |
 | `POST` | `/ccar/v1/hierarchy/{type}/reload` | Bearer | Reload ccar-forecasting-service's cached hierarchy | `200 {type, nodes}` |
-| `GET` | `/ccar/v1/{forecast\|actuals\|variance}/aggregate-summary?hierarchyType&hierarchyId&portfolioId&t0Date` | Bearer | Totals of one node per account and period | `200 {scope, t0Date, portfolioId, currency, periods, period_values}` |
+| `GET` | `/ccar/v1/{forecast\|actuals\|variance}/aggregate-summary?hierarchyType&hierarchyId&portfolioId&t0Date` | Bearer | Totals of one node per account and period | `200 {scope, t0Date, portfolioId, currency, periods, periodValuesActual and/or periodValuesForecast}` |
 | `GET` | `/ccar/v1/{forecast\|actuals\|variance}/detailed-breakdown?…&page&size` | Bearer | Same for a page of the node's direct children | `200 {scope, …, page, size, totalElements, totalPages, items[{id, name, hType, level, childCount, data_rows}]}` |
 
 `GET /ccar/v1/hierarchy/child/{type}` (lazy loading) is a planned enhancement; for now `root/{type}` returns the
@@ -711,7 +721,8 @@ Full details: [ERROR_HANDLING.md](ERROR_HANDLING.md).
   (only sample data from `CCAR_FACT_TABLES_LOAD.q`), and `GEO_HIERARCHY` is not loaded there either. The existing
   `forecast_ccar` table has no BU/GEO column, so it cannot be aggregated by hierarchy.
 - Values are summed as stored and labelled with `ccar.forecasting.currency`; there is no FX conversion.
-- Variance is read from `CCAR_VARIANCE`, not computed from forecast and actuals.
+- No variance figures (actual minus forecast) are computed: the variance aggregate summary returns both series,
+  and the variance detailed breakdown still reads `CCAR_VARIANCE`.
 - Portfolio names are their ids (there is no portfolio reference table).
 - Seeded users in `data.sql` cannot log in (SHA-256 hashes vs BCrypt); register new users instead.
 - H2 is in memory: users are lost when user-service restarts.

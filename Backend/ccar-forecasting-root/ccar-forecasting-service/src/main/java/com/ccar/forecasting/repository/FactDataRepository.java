@@ -26,6 +26,9 @@ import java.util.Map;
 /**
  * Reads forecast / actuals / variance totals from KDB, aggregated in KDB per hierarchy node and account.
  * <p>
+ * The aggregate summary of one node calls a q function defined on the KDB server ({@link #nodeTotals}). The
+ * detailed breakdown, which needs several nodes per call, still builds the query below ({@link #totals}).
+ * <p>
  * For nodes {@code ids} at hierarchy level {@code L}, every fact row is joined to the hierarchy on its node column
  * and grouped by its ancestor at level L ({@code <P>_ID_LEVEL<L>}), so a node's total covers its whole subtree:
  * <pre>
@@ -48,6 +51,8 @@ public class FactDataRepository {
 
     private final KdbTemplate kdbTemplate;
     private final Map<DataSet, String> tables = new EnumMap<>(DataSet.class);
+    /** q function returning one node's aggregate summary, for the data sets that have one. */
+    private final Map<DataSet, String> functions = new EnumMap<>(DataSet.class);
     /** Column of period n (0 = T0). */
     private final List<String> periodColumns;
 
@@ -62,6 +67,11 @@ public class FactDataRepository {
                 throw new IllegalArgumentException("Missing ccar.forecasting.datasets." + ds.path() + ".table");
             }
             tables.put(ds, QIdentifiers.requireTable(cfg.getTable().trim(), "datasets." + ds.path()));
+            String fn = cfg.getAggregateFunction();
+            if (fn != null && !fn.isBlank()) {
+                // same rule as a table name: letters, digits, '_' and '.' (namespaces), starting with a letter
+                functions.put(ds, QIdentifiers.requireTable(fn.trim(), "datasets." + ds.path() + ".aggregate-function"));
+            }
         }
         List<String> cols = new ArrayList<>(ForecastingConstant.PERIOD_COUNT + 1);
         cols.add(QIdentifiers.requireColumn(ForecastingConstant.FACT_T0_COLUMN, "fact.t0-column"));
@@ -74,6 +84,62 @@ public class FactDataRepository {
 
     public int periodCount() {
         return periodColumns.size();
+    }
+
+    /**
+     * Totals of one node (its whole subtree) per account, computed on the KDB server by the data set's q function
+     * ({@code ccar.forecasting.datasets.<dataSet>.aggregate-function}, e.g. {@code getAggregateActuals}):
+     * <pre>
+     * getAggregateActuals[`BU; 1; `ALL; `USD; 2026.09.30]
+     * </pre>
+     * The arguments are sent as typed IPC values (symbol, long, symbol, symbol, date), not as query text. The
+     * function returns one row per account: {@code ACCOUNT_ID, ACCOUNT_NAME, TO_DATE, T0, T_1 .. T_36}, values
+     * converted to {@code currency}.
+     *
+     * @param portfolioId portfolio filter, or null for all portfolios (sent as {@code `ALL})
+     * @return account id -> one value per period (null where the function returns a q null)
+     * @throws IllegalStateException if the data set has no aggregate function configured
+     */
+    public Map<String, Number[]> nodeTotals(DataSet dataSet, HierarchyDefinition hierarchy, long nodeId,
+                                            LocalDate t0Date, String portfolioId, String currency) {
+        String function = functions.get(dataSet);
+        if (function == null) {
+            throw new IllegalStateException("No ccar.forecasting.datasets." + dataSet.path() + ".aggregate-function");
+        }
+        c.Flip flip = kdbTemplate.call(function, c.Flip.class, hierarchy.type(), nodeId,
+                portfolioId == null ? ForecastingConstant.KDB_ALL_PORTFOLIOS : portfolioId, currency, t0Date);
+        try {
+            return readAccounts(flip);
+        } catch (IllegalStateException e) {
+            throw new KdbQueryException("Unexpected " + function + " result layout: " + e.getMessage());
+        }
+    }
+
+    /** One row per account: ACCOUNT_ID plus the period columns. */
+    Map<String, Number[]> readAccounts(c.Flip flip) {
+        FlipReader table = new FlipReader(flip);
+        Object accounts = table.column(ForecastingConstant.FACT_ACCOUNT_COLUMN);
+        int periods = periodColumns.size();
+        Object[] columns = new Object[periods];
+        for (int p = 0; p < periods; p++) {
+            columns[p] = table.column(periodColumns.get(p));
+        }
+
+        Map<String, Number[]> result = new LinkedHashMap<>();
+        for (int row = 0; row < table.rowCount(); row++) {
+            String account = FlipReader.text(c.at(accounts, row));
+            if (account == null) {
+                continue; // rows without an account cannot be shown
+            }
+            Number[] values = new Number[periods];
+            for (int p = 0; p < periods; p++) {
+                if (c.at(columns[p], row) instanceof Number n) {
+                    values[p] = n;
+                }
+            }
+            result.put(account, values);
+        }
+        return result;
     }
 
     /**

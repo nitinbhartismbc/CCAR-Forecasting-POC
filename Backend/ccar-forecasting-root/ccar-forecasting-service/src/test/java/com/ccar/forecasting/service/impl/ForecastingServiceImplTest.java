@@ -72,6 +72,18 @@ class ForecastingServiceImplTest {
             queries.add(query);
             return (T) facts;
         }
+
+        /** Aggregate-function calls, as {@code fn[arg1;arg2;...]}. */
+        final List<String> calls = new ArrayList<>();
+        c.Flip summary = TestData.accountFacts(new long[]{210001, 999999},
+                "T0", new double[]{8504978, 1}, "T_1", new double[]{8516417, 2});
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T> T call(String function, Class<T> clazz, Object... args) {
+            calls.add(function + "[" + String.join(";", Arrays.stream(args).map(String::valueOf).toList()) + "]");
+            return (T) summary;
+        }
     }
 
     private final FakeKdb kdb = new FakeKdb();
@@ -93,28 +105,48 @@ class ForecastingServiceImplTest {
         assertEquals(37, s.periods().size()); // T0, T+1 .. T+36
         assertEquals(List.of("T0", "T+1", "T+2"), s.periods().subList(0, 3));
 
-        List<PeriodValues> rows = s.periodValues();
+        assertNull(s.periodValuesActual()); // forecast only
+        List<PeriodValues> rows = s.periodValuesForecast();
         assertEquals(List.of("210001", "400001", "500001", "999999"),
                 rows.stream().map(PeriodValues::accountId).toList());
         assertEquals(List.of("Balance", "Revenue", "Expense", "999999"),
                 rows.stream().map(PeriodValues::measure).toList());
-        assertEquals(Arrays.asList(8504978L, 8516417L, null), rows.get(0).values().subList(0, 3));
+        assertEquals(Arrays.asList(8504978.0, 8516417.0, null), rows.get(0).values().subList(0, 3));
         assertEquals(Arrays.asList(null, null, null), rows.get(1).values().subList(0, 3)); // no data for Revenue
-        assertTrue(kdb.queries.stream().anyMatch(q -> q.contains("where BU_ID_LEVEL1 in (),1]")));
-        assertTrue(kdb.queries.stream().noneMatch(q -> q.contains("PORTFOLIO_ID=")));
+        // one call of the forecast function, no query built here
+        assertEquals(List.of("getAggregateForecast[BU;1;ALL;USD;2026-09-30]"), kdb.calls);
+        assertTrue(kdb.queries.isEmpty());
         // the node comes from ccar-hierarchy-service (without children), never from a KDB hierarchy table
         assertEquals(List.of("BU/1?depth=0"), hierarchyService.calls);
-        assertTrue(kdb.queries.stream().noneMatch(q -> q.startsWith("0!select from")));
     }
 
     @Test
-    void actualsAndVarianceLookBackwards() {
-        assertEquals(List.of("T0", "T-1", "T-2"),
-                service.aggregateSummary(DataSet.ACTUALS, "BU", 1, null, T0).periods().subList(0, 3));
+    void actualsSummaryHasOnlyActualValuesAndLooksBackwards() {
+        AggregateSummary a = service.aggregateSummary(DataSet.ACTUALS, "BU", 1, null, T0);
+
+        assertEquals(List.of("T0", "T-1", "T-2"), a.periods().subList(0, 3));
+        assertEquals(Arrays.asList(8504978.0, 8516417.0, null),
+                a.periodValuesActual().get(0).values().subList(0, 3));
+        assertNull(a.periodValuesForecast());
+        // no portfolio = all portfolios, sent to the function as `ALL
+        assertEquals(List.of("getAggregateActuals[BU;1;ALL;USD;2026-09-30]"), kdb.calls);
+        assertTrue(kdb.queries.isEmpty());
+    }
+
+    @Test
+    void varianceSummaryCallsTheActualsAndForecastFunctions() {
         AggregateSummary v = service.aggregateSummary(DataSet.VARIANCE, "BU", 1, "port_0001", T0);
+
         assertEquals(List.of("T0", "T-1", "T-2"), v.periods().subList(0, 3));
-        assertTrue(kdb.queries.stream().anyMatch(q -> q.contains("from CCAR_VARIANCE where T0_DATE=2026.09.30, "
-                + "PORTFOLIO_ID=`$\"port_0001\"")));
+        assertEquals(List.of("210001", "400001", "500001", "999999"),
+                v.periodValuesActual().stream().map(PeriodValues::accountId).toList());
+        assertEquals(List.of("210001", "400001", "500001", "999999"),
+                v.periodValuesForecast().stream().map(PeriodValues::accountId).toList());
+        assertEquals(List.of("getAggregateActuals[BU;1;port_0001;USD;2026-09-30]",
+                "getAggregateForecast[BU;1;port_0001;USD;2026-09-30]"), kdb.calls);
+        assertTrue(kdb.queries.isEmpty()); // CCAR_VARIANCE is not read by the summary
+        // one hierarchy-service call for both series
+        assertEquals(List.of("BU/1?depth=0"), hierarchyService.calls);
     }
 
     @Test

@@ -69,8 +69,28 @@ public class KdbTemplate {
             String query,
             Class<T> clazz) {
 
-        Object result = run(query);
+        return cast(run(query), clazz);
+    }
 
+    /**
+     * Calls the q function {@code function} defined on the server with {@code args}, e.g.
+     * {@code call("getAggregateActuals", c.Flip.class, "BU", 1L, "ALL", "USD", LocalDate.of(2026, 9, 30))}.
+     * <p>
+     * The arguments travel as typed IPC values ({@code String} = symbol, {@code Long} = long, {@code LocalDate} =
+     * date, {@code char[]} = string, ...), never spliced into query text, so they cannot inject q code. Same
+     * failure translation as {@link #execute(String, Class)}.
+     */
+    public <T> T call(String function, Class<T> clazz, Object... args) {
+        if (function == null || function.isBlank()) {
+            throw new IllegalArgumentException("KDB function name is required");
+        }
+        Object[] message = new Object[args.length + 1];
+        message[0] = function.toCharArray(); // ("fn"; arg1; ...): q looks the name up and applies it to the args
+        System.arraycopy(args, 0, message, 1, args.length);
+        return cast(run(function, connection -> connection.k(message)), clazz);
+    }
+
+    private static <T> T cast(Object result, Class<T> clazz) {
         if (!clazz.isInstance(result)) {
             throw new KdbQueryException(
                     "Unexpected KDB result type: expected " + clazz.getName() + " but got "
@@ -131,14 +151,25 @@ public class KdbTemplate {
 
     // -------------------------------------------------------------------------------------------------------
 
+    /** One request on a connection: a query string or a function call. */
+    @FunctionalInterface
+    private interface Request {
+        Object send(c connection) throws c.KException, IOException;
+    }
+
     private Object run(String query) {
+        return run(query, connection -> connection.k(query));
+    }
+
+    /** @param description query text or function name, for the debug log only */
+    private Object run(String description, Request request) {
 
         c connection = borrow();
         boolean healthy = true;
 
         try {
-            log.debug("Executing KDB query : {}", query);
-            return connection.k(query);
+            log.debug("Executing KDB query : {}", description);
+            return request.send(connection);
 
         } catch (c.KException ex) {
             // q-level error ('type, 'length, unknown table...): the connection itself is fine
