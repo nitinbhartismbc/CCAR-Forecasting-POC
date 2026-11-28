@@ -11,6 +11,8 @@ import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -66,15 +68,35 @@ public class ReferenceDataRepository {
     public List<LocalDate> t0Dates() {
         Object result = kdbTemplate.execute("desc exec distinct " + t0DateColumn + " from " + table);
 
-        DateTimeFormatter formatter =
-                DateTimeFormatter.ofPattern("dd-MMM-yy", Locale.ENGLISH);
-
-
         return FlipReader.list(result).stream()
                 .filter(Objects::nonNull)
-                .map(Object::toString)
-                .map(date -> LocalDate.parse(date, formatter))
+                .map(ReferenceDataRepository::toLocalDate)
                 .collect(Collectors.toList());
+    }
+
+    /** Text form used when the T0 column is a symbol/string, e.g. {@code 30-Sep-26}. */
+    private static final DateTimeFormatter DD_MMM_YY = new DateTimeFormatterBuilder()
+            .parseCaseInsensitive()
+            .appendPattern("dd-MMM-yy")
+            .toFormatter(Locale.ENGLISH);
+
+    /**
+     * A q {@code date} arrives as {@link LocalDate} (or {@link java.sql.Date} with older kx drivers); a symbol or
+     * string column arrives as text, either ISO ({@code 2026-09-30}) or {@code dd-MMM-yy} ({@code 30-Sep-26}).
+     */
+    private static LocalDate toLocalDate(Object value) {
+        if (value instanceof LocalDate date) {
+            return date;
+        }
+        if (value instanceof java.sql.Date date) {
+            return date.toLocalDate();
+        }
+        String text = FlipReader.text(value);
+        try {
+            return LocalDate.parse(text);
+        } catch (DateTimeParseException iso) {
+            return LocalDate.parse(text, DD_MMM_YY);
+        }
     }
 }
 

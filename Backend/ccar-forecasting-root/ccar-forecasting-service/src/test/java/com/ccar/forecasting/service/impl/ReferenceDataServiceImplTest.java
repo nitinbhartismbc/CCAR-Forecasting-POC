@@ -2,6 +2,7 @@ package com.ccar.forecasting.service.impl;
 
 import com.ccar.forecasting.TestData;
 import com.ccar.forecasting.config.ForecastingProperties;
+import com.ccar.forecasting.constant.ForecastingConstant;
 import com.ccar.forecasting.model.Portfolio;
 import com.ccar.forecasting.repository.ReferenceDataRepository;
 import com.iris.kdb.service.KdbTemplate;
@@ -54,7 +55,7 @@ class ReferenceDataServiceImplTest {
 
     @Test
     void portfoliosStartWithAllAndDatesDropNulls() {
-        assertEquals(List.of(new Portfolio("ALL", "All Portfolios"), new Portfolio("PORT_0001", "PORT_0001"),
+        assertEquals(List.of(new Portfolio(ForecastingConstant.ALL_PORTFOLIOS_ID, "All Portfolios"),new Portfolio("PORT_0001", "PORT_0001"),
                 new Portfolio("PORT_0002", "PORT_0002")), service.portfolios());
         assertEquals(List.of("2026-09-30", "2025-12-31"), service.t0Dates());
     }
